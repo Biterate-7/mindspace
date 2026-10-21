@@ -2,6 +2,7 @@
 
 import { Command, Download, Keyboard, PanelLeft, Plus, Redo2, Star, Undo2 } from "lucide-react";
 import { useRef, useState } from "react";
+import { ModeSwitch } from "@/components/app/ModeSwitch";
 import { LogoMark } from "@/components/ui/PixelIcon";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useMindspace } from "@/lib/store";
@@ -70,6 +71,8 @@ export function TopBar({ compact }: { compact: boolean }) {
   const undo = useMindspace((s) => s.undo);
   const redo = useMindspace((s) => s.redo);
   const openCreate = useMindspace((s) => s.openCreate);
+  const openDiscover = useMindspace((s) => s.openDiscover);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
   const setDialog = useMindspace((s) => s.setDialog);
   const starred = useMindspace((s) => s.current?.starred ?? false);
   const currentId = useMindspace((s) => s.current?.id);
@@ -84,8 +87,9 @@ export function TopBar({ compact }: { compact: boolean }) {
       </Tooltip>
       <div className="flex shrink-0 items-center gap-2 pr-1 sm:pr-2">
         <LogoMark size={18} />
-        <span className="font-pixel hidden text-[11px] tracking-[0.14em] text-ink md:inline">MINDSPACE</span>
+        <span className="font-pixel hidden text-[11px] tracking-[0.14em] text-ink xl:inline">MINDSPACE</span>
       </div>
+      <ModeSwitch compact={compact} className="mr-1" />
       <span className="hidden h-5 w-px bg-line sm:block" aria-hidden="true" />
       <TitleField />
       {currentId && (
@@ -128,10 +132,10 @@ export function TopBar({ compact }: { compact: boolean }) {
             {!compact && <span>Export</span>}
           </button>
         </Tooltip>
-        <Tooltip label="New map" shortcut="N">
-          <button type="button" className={`px-btn-primary ${compact ? "h-8 w-9 px-0" : "ml-1"}`} onClick={openCreate} aria-label="Create a new map">
+        <Tooltip label={discovery ? "New research" : "New map"} shortcut="N">
+          <button type="button" className={`px-btn-primary ${compact ? "h-8 w-9 px-0" : "ml-1"}`} onClick={discovery ? openDiscover : openCreate} aria-label={discovery ? "Start new research" : "Create a new map"}>
             <Plus size={14} strokeWidth={2.5} />
-            {!compact && <span>New map</span>}
+            {!compact && <span>{discovery ? "New research" : "New map"}</span>}
           </button>
         </Tooltip>
       </div>

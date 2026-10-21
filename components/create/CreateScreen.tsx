@@ -4,6 +4,7 @@ import { ArrowRight, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import type { Graph } from "@/types/graph";
+import { ModeSwitch } from "@/components/app/ModeSwitch";
 import { LogoMark } from "@/components/ui/PixelIcon";
 import { generateMap } from "@/lib/generation";
 import { useMindspace } from "@/lib/store";
@@ -60,7 +61,7 @@ export function CreateScreen({ overlay = false }: { overlay?: boolean }) {
   }, [overlay, closeCreate]);
 
   const graph = preview?.graph ?? sample;
-  const recent = maps.slice(0, 3);
+  const recent = maps.filter((m) => m.workspace !== "discovery").slice(0, 3);
 
   return (
     <motion.div
@@ -90,13 +91,16 @@ export function CreateScreen({ overlay = false }: { overlay?: boolean }) {
           <span className="font-pixel text-[13px] tracking-[0.14em] text-ink">MINDSPACE</span>
           <span className="px-caption hidden sm:inline">· put your brain on a map</span>
         </div>
-        {overlay && (
-          <button type="button" className="px-btn h-9 gap-2 bg-void/60" onClick={closeCreate} aria-label="Close and return to your map">
-            <X size={15} />
-            <span className="hidden sm:inline">Back to map</span>
-            <kbd className="px-kbd hidden sm:inline-flex">Esc</kbd>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <ModeSwitch compact={!wide} />
+          {overlay && (
+            <button type="button" className="px-btn h-9 gap-2 bg-void/60" onClick={closeCreate} aria-label="Close and return to your map">
+              <X size={15} />
+              <span className="hidden sm:inline">Back to map</span>
+              <kbd className="px-kbd hidden sm:inline-flex">Esc</kbd>
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="relative z-10 h-full overflow-y-auto">

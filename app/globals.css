@@ -775,6 +775,57 @@
   }
 }
 
+/* --- Discovery nodes ---------------------------------------------------------- */
+
+/* Filtered out by a Discovery filter: present for context, out of the way. */
+.ms-node[data-emph^="x"] {
+  opacity: 0.12;
+}
+
+.ms-node[data-role="source"][data-status="pending"]:not([data-working]) .ms-sprite {
+  opacity: 0.62;
+}
+
+.ms-node[data-role="source"][data-status="failed"]:not([data-working]) .ms-sprite {
+  filter: grayscale(0.85) brightness(0.8);
+}
+
+/* A source being imported: a slow, stepped scan ring. */
+.ms-scan {
+  position: absolute;
+  inset: -18%;
+  border: 1px dashed rgba(94, 227, 242, 0.55);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ms-node[data-working="true"] .ms-scan {
+  opacity: 1;
+  animation: ms-spin 6s steps(24) infinite;
+}
+
+.ms-tag-source {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.ms-tag-pulse {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-right: 5px;
+  vertical-align: 1px;
+  background: currentColor;
+  animation: ms-blink 0.9s steps(1) infinite;
+}
+
+.ms-tag-count {
+  color: var(--color-ink-3);
+}
+
 /* --- Edges ----------------------------------------------------------------- */
 
 .ms-edge path.ms-edge-path {
@@ -796,6 +847,9 @@
   opacity: 0.16;
 }
 .ms-edge[data-emph^="f"] {
+  opacity: 0.05;
+}
+.ms-edge[data-emph^="x"] {
   opacity: 0.05;
 }
 
@@ -851,7 +905,8 @@
 }
 
 .ms-edge-label[data-emph^="f"],
-.ms-edge-label[data-emph^="d"] {
+.ms-edge-label[data-emph^="d"],
+.ms-edge-label[data-emph^="x"] {
   opacity: 0.08;
 }
 

@@ -50,6 +50,19 @@ export function CommandMenu({ open, onClose }: { open: boolean; onClose: () => v
       { id: "redo", label: "Redo", group: "Actions", shortcut: "Ctrl ⇧ Z", run: () => s().redo() },
       { id: "shortcuts", label: "Keyboard shortcuts", group: "Actions", shortcut: "?", run: () => setTimeout(() => s().setDialog({ type: "shortcuts" }), 0) },
     ];
+    if (s().current?.workspace === "discovery") {
+      actions.unshift(
+        { id: "research-new", label: "New research", group: "Actions", shortcut: "N", run: () => s().openDiscover() },
+        { id: "research-search", label: "Search for sources", group: "Actions", run: () => s().setResearchTab("search") },
+        { id: "research-sources", label: "Add a source URL", group: "Actions", run: () => s().setResearchTab("sources") },
+        { id: "research-notes", label: "Open research notes", group: "Actions", run: () => s().setResearchTab("notes") },
+        { id: "research-review", label: "Show unreviewed links", group: "Actions", run: () => s().setResearchFilter("unreviewed") },
+        { id: "mode-create", label: "Switch to Create", group: "Actions", run: () => s().switchMode("create") },
+      );
+      actions.splice(actions.findIndex((a) => a.id === "new"), 1);
+    } else {
+      actions.push({ id: "mode-discovery", label: "Switch to Discovery", group: "Actions", run: () => s().switchMode("discovery") });
+    }
     if (selected) {
       actions.splice(
         2,

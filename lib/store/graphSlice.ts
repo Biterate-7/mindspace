@@ -1,12 +1,14 @@
 import { applyEdgeChanges, applyNodeChanges } from "@xyflow/react";
 import type { StateCreator } from "zustand";
 import type { IdeaEdge, IdeaNode } from "@/types/graph";
+import { computeResearchLayout } from "@/lib/discovery/layout";
+import { isUnreviewed } from "@/lib/discovery/merge";
 import { computeEmphasis, searchNodes } from "@/lib/graph/emphasis";
 import { record, redo as redoHistory, sameGraph, undo as undoHistory } from "@/lib/graph/history";
 import * as ops from "@/lib/graph/ops";
 import { computeLayout } from "@/lib/generation/layout";
 import { prefersReducedMotion } from "@/lib/utils/motion";
-import type { GraphSlice, Store } from "./types";
+import type { GraphSlice, ResearchFilter, Store } from "./types";
 
 type SetState = Parameters<StateCreator<Store>>[0];
 type GetState = () => Store;
@@ -16,9 +18,22 @@ const COALESCE_MS = 1200;
 let lastCoalesce: { key: string; at: number } | null = null;
 let dragSnapshot: ReturnType<typeof ops.toGraph> | null = null;
 let relayoutFrame = 0;
+let relayoutAnimating = false;
 
 function neighbourIds(edges: readonly IdeaEdge[], id: string): string[] {
   return [id, ...ops.neighborIds(edges, id)];
+}
+
+/** Ids kept bright by a Discovery filter, or null when nothing is filtered. */
+export function filterSets(nodes: readonly IdeaNode[], edges: readonly IdeaEdge[], filter: ResearchFilter): { nodes: Set<string>; edges: Set<string> } | null {
+  if (filter === "all") return null;
+  if (filter === "unreviewed") {
+    const kept = edges.filter(isUnreviewed);
+    return { nodes: new Set(kept.flatMap((e) => [e.source, e.target])), edges: new Set(kept.map((e) => e.id)) };
+  }
+  const match = (n: IdeaNode) => (filter === "ideas" ? !n.data.role : filter === "sources" ? n.data.role === "source" : n.data.role === "concept");
+  const ids = new Set(nodes.filter(match).map((n) => n.id));
+  return { nodes: ids, edges: new Set(edges.filter((e) => ids.has(e.source) && ids.has(e.target)).map((e) => e.id)) };
 }
 
 /** Recomputes everything derived from nodes/edges + interaction state. */
@@ -31,6 +46,7 @@ export function derive(state: Store): Pick<Store, "emphasis" | "searchMatches" |
   const focusId = state.focusId && ids.has(state.focusId) ? state.focusId : null;
   const searchMatches = state.searchQuery.trim() ? searchNodes(state.nodes, state.searchQuery) : null;
   const searchIndex = searchMatches && state.searchIndex < searchMatches.length ? state.searchIndex : 0;
+  const discovery = state.current?.workspace === "discovery";
   const emphasis = computeEmphasis({
     nodes: state.nodes,
     edges: state.edges,
@@ -38,6 +54,8 @@ export function derive(state: Store): Pick<Store, "emphasis" | "searchMatches" |
     selectedId: selectedNodeId,
     focusId: state.focusMode ? focusId : null,
     searchMatches,
+    filter: discovery ? filterSets(state.nodes, state.edges, state.researchFilter) : null,
+    selectionFocus: discovery,
   });
   return { emphasis, searchMatches, selectedNodeId, selectedEdgeId, hoverId, focusId, searchIndex };
 }
@@ -164,7 +182,8 @@ export const createGraphSlice: StateCreator<Store, [], [], GraphSlice> = (set, g
       get().addIdeaAt({ x: 0, y: 0 });
       return;
     }
-    const change = ops.addChild(state, anchor);
+    // In Discovery, anything you add is your own idea, whatever it hangs off.
+    const change = ops.addChild(state, anchor, state.current?.workspace === "discovery" ? { category: "idea" } : {});
     if (!change?.createdId) return;
     const nodes = withSelection(change.nodes, new Set([change.createdId]));
     commit(set, get, { nodes, edges: clearEdgeSelection(change.edges), selectedNodeId: change.createdId, selectedEdgeId: null, freshNodeId: change.createdId });
@@ -173,7 +192,7 @@ export const createGraphSlice: StateCreator<Store, [], [], GraphSlice> = (set, g
 
   addIdeaAt: (position) => {
     const state = get();
-    const change = ops.addStandalone(state, position);
+    const change = ops.addStandalone(state, position, state.current?.workspace === "discovery" && state.nodes.length > 0 ? { category: "idea" } : {});
     if (!change.createdId) return;
     const nodes = withSelection(change.nodes, new Set([change.createdId]));
     commit(set, get, { nodes, edges: clearEdgeSelection(change.edges), selectedNodeId: change.createdId, selectedEdgeId: null, freshNodeId: change.createdId });
@@ -251,6 +270,10 @@ export const createGraphSlice: StateCreator<Store, [], [], GraphSlice> = (set, g
 
   duplicateNode: (id) => {
     const state = get();
+    if (state.nodes.find((n) => n.id === id)?.data.role) {
+      state.toast("Sources and extracted concepts can't be duplicated. Add your own idea and connect it instead.");
+      return;
+    }
     const change = ops.duplicateNode(state, id);
     if (!change?.createdId) return;
     const nodes = withSelection(change.nodes, new Set([change.createdId]));
@@ -262,11 +285,13 @@ export const createGraphSlice: StateCreator<Store, [], [], GraphSlice> = (set, g
     const state = get();
     if (state.nodes.length === 0) return;
     cancelAnimationFrame(relayoutFrame);
-    const target = computeLayout(ops.toGraph(state));
+    const target = state.current?.workspace === "discovery" ? computeResearchLayout(state.nodes, state.edges) : computeLayout(ops.toGraph(state));
     const from = new Map(state.nodes.map((n) => [n.id, { ...n.position }]));
     lastCoalesce = null;
     set({ history: record(state.history, ops.toGraph(state)) });
+    relayoutAnimating = true;
     const finish = () => {
+      relayoutAnimating = false;
       const s = get();
       set({ nodes: s.nodes.map((n) => (target[n.id] ? { ...n, position: target[n.id] } : n)), version: s.version + 1 });
       get().requestCamera({ type: "fit", duration: 700 });
@@ -347,6 +372,15 @@ export const createGraphSlice: StateCreator<Store, [], [], GraphSlice> = (set, g
   startLink: (sourceId) => set({ linkSourceId: sourceId }),
 
   clearFresh: () => set({ freshNodeId: null }),
+
+  commitGraph: (change, coalesceKey) => {
+    const patch: Partial<Store> = {};
+    if (change.nodes) patch.nodes = change.nodes;
+    if (change.edges) patch.edges = change.edges;
+    commit(set, get, patch, coalesceKey);
+  },
+
+  isBusy: () => dragSnapshot !== null || relayoutAnimating,
 });
 
 function restore(set: SetState, get: GetState, graph: ReturnType<typeof ops.toGraph>, history: Store["history"]): void {
@@ -364,6 +398,7 @@ export function resetGraphState(nodes: IdeaNode[], edges: IdeaEdge[]): Partial<S
   lastCoalesce = null;
   dragSnapshot = null;
   return {
+    researchFilter: "all",
     nodes,
     edges,
     history: { past: [], future: [] },

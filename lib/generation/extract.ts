@@ -17,7 +17,7 @@ const WEAK_WORDS = new Set(
   ),
 );
 
-interface Token {
+export interface Token {
   text: string;
   stem: string;
   start: number;
@@ -26,14 +26,14 @@ interface Token {
   capital: boolean;
 }
 
-interface Sentence {
+export interface Sentence {
   index: number;
   text: string;
   paragraph: number;
   tokens: Token[];
 }
 
-interface Candidate {
+export interface Candidate {
   key: string;
   size: number;
   forms: Map<string, number>;
@@ -54,7 +54,7 @@ export interface TextResult {
 const WORD = /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu;
 const EXAMPLE_LEAD = /(such as|for example|for instance|e\.g\.|including)\s*$/i;
 
-function tokenizeSentence(text: string): Token[] {
+export function tokenizeSentence(text: string): Token[] {
   const tokens: Token[] = [];
   for (const match of text.matchAll(WORD)) {
     const raw = match[0];
@@ -84,7 +84,7 @@ function detectTitle(lines: string[]): { title: string | null; body: string } {
   return { title: null, body: lines.join("\n") };
 }
 
-function collectCandidates(sentences: Sentence[], titleStems: Set<string>): Map<string, Candidate> {
+export function collectCandidates(sentences: Sentence[], titleStems: Set<string>): Map<string, Candidate> {
   const candidates = new Map<string, Candidate>();
   const total = Math.max(1, sentences.length);
 
@@ -170,7 +170,7 @@ function collectCandidates(sentences: Sentence[], titleStems: Set<string>): Map<
 }
 
 /** Common words that are nearly always verbs, used to reject clause fragments. */
-const VERBS = new Set(
+export const VERBS = new Set(
   `argue argues argued compete competes competed enable enables enabled regain regains protect protects protected become becomes became include includes provide provides allow allows seem seems tend tends explain explains describe describes develop develops involve involves require requires ensure ensures improve improves generate generates encourage encourages prevent prevents achieve achieves avoid avoids determine determines depend depends rely relies appear appears remain remains suggest suggests believe believes consider considers create creates produce produces affect affects reveal reveals receive receives represent represents reflect reflects replace replaces rank ranks reward rewards drives linked link links breaking break breaks grow grows growing grew lead leads led cause causes caused help helps helped makes made gives gave takes took shows showed find finds found keep keeps kept leave leaves left bring brings brought begin begins began happen happens happened offer offers offered expect expects expected reach reaches reached claim claims claimed`.split(
     /\s+/,
   ),
@@ -190,7 +190,7 @@ function isAdverb(word: string): boolean {
   return word.length >= 6 && word.endsWith("ly") && !LY_NOUNS.has(word);
 }
 
-function bestForm(candidate: Candidate): string {
+export function bestForm(candidate: Candidate): string {
   let best = "";
   let bestCount = -1;
   for (const [form, count] of candidate.forms) {
@@ -208,7 +208,7 @@ function containsPhrase(longer: string, shorter: string): boolean {
   return ` ${longer} `.includes(` ${shorter} `);
 }
 
-function selectConcepts(candidates: Map<string, Candidate>, limit: number): Candidate[] {
+export function selectConcepts(candidates: Map<string, Candidate>, limit: number): Candidate[] {
   const all = [...candidates.values()];
   const recurring = all.filter((c) => c.sentences.size >= 2);
   const absorbed = new Set<Candidate>();
@@ -268,7 +268,7 @@ function selectConcepts(candidates: Map<string, Candidate>, limit: number): Cand
   return selected;
 }
 
-function locate(sentence: Sentence, candidate: Candidate): { start: number; end: number } | null {
+export function locate(sentence: Sentence, candidate: Candidate): { start: number; end: number } | null {
   const stems = candidate.key.split(" ");
   const { tokens } = sentence;
   for (let i = 0; i + stems.length <= tokens.length; i++) {

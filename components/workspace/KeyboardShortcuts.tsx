@@ -13,7 +13,7 @@ export function KeyboardShortcuts() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const state = useMindspace.getState();
-      if (state.view !== "workspace" || state.createOpen) return;
+      if (state.view !== "workspace" || state.createOpen || state.discoverOpen) return;
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key;
 
@@ -59,7 +59,8 @@ export function KeyboardShortcuts() {
         case "n":
         case "N":
           if (event.shiftKey) return;
-          state.openCreate();
+          if (state.current?.workspace === "discovery") state.openDiscover();
+          else state.openCreate();
           break;
         case "f":
           void flow.fitView({ padding: 0.16, duration: 500, maxZoom: 1.15 });

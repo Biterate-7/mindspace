@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight, Copy, Crosshair, Link2, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { CATEGORIES, NODE_KINDS, RELATIONS, type IdeaData, type NodeKind, type Relation } from "@/types/graph";
+import { CATEGORIES, NODE_KINDS, RELATIONS, RESEARCH_RELATIONS, type IdeaData, type NodeKind, type Relation } from "@/types/graph";
 import { PixelSprite } from "@/components/graph/PixelSprite";
 import { RELATION_LABELS } from "@/lib/generation/relations";
 import { CATEGORY_LABELS, CATEGORY_RAMPS, RELATION_COLORS } from "@/lib/space/palette";
@@ -45,6 +45,7 @@ export function NodeInspector({ id, data }: { id: string; data: IdeaData }) {
   const setRelation = useMindspace((s) => s.setRelation);
   const deleteEdge = useMindspace((s) => s.deleteEdge);
   const selectNode = useMindspace((s) => s.selectNode);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
   const titleRef = useRef<HTMLTextAreaElement>(null);
 
 
@@ -192,11 +193,12 @@ export function NodeInspector({ id, data }: { id: string; data: IdeaData }) {
                     style={{ color: RELATION_COLORS[relation] }}
                     aria-label={`Relationship with ${other.label}`}
                   >
-                    {RELATIONS.map((r) => (
+                    {(discovery ? RESEARCH_RELATIONS : RELATIONS).map((r) => (
                       <option key={r} value={r}>
                         {RELATION_LABELS[r]}
                       </option>
                     ))}
+                    {!(discovery ? RESEARCH_RELATIONS : RELATIONS).includes(relation) && <option value={relation}>{RELATION_LABELS[relation]}</option>}
                   </select>
                   <button type="button" onClick={() => selectNode(otherId)} className="min-w-0 flex-1 truncate text-left text-[12.5px] text-ink-2 hover:text-ink" title={other.label}>
                     {other.label}

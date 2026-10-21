@@ -3,6 +3,7 @@
 import { AnimatePresence } from "motion/react";
 import { useEffect } from "react";
 import { CreateScreen } from "@/components/create/CreateScreen";
+import { DiscoverScreen } from "@/components/discovery/DiscoverScreen";
 import { Toasts } from "@/components/ui/Toasts";
 import { Workspace } from "@/components/workspace/Workspace";
 import { useMindspace } from "@/lib/store";
@@ -14,6 +15,7 @@ import { useMindspace } from "@/lib/store";
 export function MindspaceApp() {
   const view = useMindspace((s) => s.view);
   const createOpen = useMindspace((s) => s.createOpen);
+  const discoverOpen = useMindspace((s) => s.discoverOpen);
   const init = useMindspace((s) => s.init);
 
   useEffect(() => {
@@ -24,6 +26,7 @@ export function MindspaceApp() {
     <>
       {view === "workspace" && <Workspace />}
       <AnimatePresence>{(view === "create" || (view === "workspace" && createOpen)) && <CreateScreen key="create" overlay={view === "workspace"} />}</AnimatePresence>
+      <AnimatePresence>{(view === "discover" || (view === "workspace" && discoverOpen)) && <DiscoverScreen key="discover" overlay={view === "workspace"} />}</AnimatePresence>
       <Toasts />
     </>
   );

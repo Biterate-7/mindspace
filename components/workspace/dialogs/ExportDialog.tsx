@@ -2,6 +2,7 @@
 
 import { Download, LoaderCircle } from "lucide-react";
 import { useMemo, useState } from "react";
+import { DataExport } from "@/components/discovery/DataExport";
 import { Dialog } from "@/components/ui/Dialog";
 import { computeExportGeometry, computeFrameLayout, exportFileName, graphBounds } from "@/lib/export/geometry";
 import { downloadBlob, renderGraphPng } from "@/lib/export/png";
@@ -33,6 +34,8 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
   const [quality, setQuality] = useState<2 | 3>(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
+  const [format, setFormat] = useState<"png" | "json">("png");
   const fileName = exportFileName(title);
 
   const size = useMemo(() => {
@@ -73,7 +76,27 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
   };
 
   return (
-    <Dialog open={open} onClose={busy ? () => {} : onClose} title="Export PNG" eyebrow="Capture the galaxy" width={460}>
+    <Dialog open={open} onClose={busy ? () => {} : onClose} title={format === "json" ? "Export research data" : "Export PNG"} eyebrow="Capture the galaxy" width={460}>
+      {discovery && (
+        <div className="flex gap-1 px-5 pt-3" role="radiogroup" aria-label="Export format">
+          {(["png", "json"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              role="radio"
+              aria-checked={format === f}
+              onClick={() => setFormat(f)}
+              className={`font-pixel h-8 flex-1 border text-[8px] uppercase tracking-[0.12em] ${format === f ? "border-[rgba(179,156,255,0.4)] bg-accent/15 text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}
+            >
+              {f === "png" ? "Image · PNG" : "Data · JSON"}
+            </button>
+          ))}
+        </div>
+      )}
+      {format === "json" && discovery ? (
+        <DataExport onClose={onClose} />
+      ) : (
+        <>
       <div className="px-5 py-2">
         <Toggle
           label="Caption frame"
@@ -130,6 +153,8 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
           {busy ? "Rendering" : "Export PNG"}
         </button>
       </div>
+        </>
+      )}
     </Dialog>
   );
 }

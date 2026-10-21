@@ -8,7 +8,7 @@ import { RELATION_COLORS } from "@/lib/space/palette";
 
 export type MenuTarget =
   | { type: "node"; id: string; x: number; y: number }
-  | { type: "edge"; id: string; relation: Relation; x: number; y: number }
+  | { type: "edge"; id: string; relation: Relation; x: number; y: number; relations?: readonly Relation[] }
   | { type: "pane"; x: number; y: number; flow: { x: number; y: number } };
 
 interface Item {
@@ -55,7 +55,7 @@ export function ContextMenu({ target, onClose, actions }: ContextMenuProps) {
         ]
       : target.type === "edge"
         ? [
-            ...RELATIONS.map((relation) => ({
+            ...(target.relations ?? RELATIONS).map((relation) => ({
               key: relation,
               label: RELATION_LABELS[relation],
               checked: relation === target.relation,
@@ -116,7 +116,7 @@ export function ContextMenu({ target, onClose, actions }: ContextMenuProps) {
       onKeyDown={onKeyDown}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {target.type === "edge" && <p className="px-caption px-3 pb-1 pt-1.5">Relationship</p>}
+      {target.type === "edge" && <p className="px-caption px-3 pb-1 pt-1.5">{target.relations?.length === 0 ? "Source attribution" : "Relationship"}</p>}
       {items.map((item) => (
         <button
           key={item.key}

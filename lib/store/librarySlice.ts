@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 import type { MapMeta, MindMap } from "@/types/graph";
 import { DEFAULT_PREFERENCES } from "@/types/graph";
+import { contentStore } from "@/lib/discovery/contentStore";
 import { EmptyInputError, generateMap } from "@/lib/generation";
 import { computeIntroDelays } from "@/lib/graph/intro";
 import * as ops from "@/lib/graph/ops";
@@ -78,6 +79,8 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
   };
 
   const loadIntoWorkspace = (map: MindMap, intro: "full" | "short") => {
+    // Imports belong to the map that started them; leaving it pauses them (sources stay "pending").
+    get().cancelAllJobs();
     const { nodes, edges } = ops.fromGraph(map);
     const info: MapInfo = {
       id: map.id,
@@ -88,8 +91,25 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
       source: map.source,
       viewport: map.viewport,
     };
-    set({ ...resetGraphState(nodes, edges), current: info, view: "workspace", createOpen: false });
-    get().setPrefs({ lastMapId: map.id });
+    const discovery = map.workspace === "discovery";
+    if (discovery) {
+      info.workspace = "discovery";
+      info.research = map.research ?? { question: map.title, notes: "", analysis: "local" };
+    }
+    set({
+      ...resetGraphState(nodes, edges),
+      current: info,
+      view: "workspace",
+      createOpen: false,
+      discoverOpen: false,
+      mode: discovery ? "discovery" : "create",
+      selectedResults: [],
+      searchState: { status: "idle", more: false },
+      // Discovery's left rail is the research panel; the maps list is a slide-over that starts closed.
+      ...(discovery ? { sidebarOpen: false } : { sidebarOpen: get().prefs.sidebarOpen && window.matchMedia("(min-width: 1024px)").matches }),
+    });
+    get().setPrefs(discovery ? { lastMapId: map.id, lastResearchId: map.id } : { lastMapId: map.id });
+    if (discovery) get().loadDiscoveryConfig();
     startIntro(intro === "full" ? 1 : 0.45);
     if (map.viewport && intro === "short") get().requestCamera({ type: "viewport", viewport: map.viewport });
     else get().requestCamera({ type: "fit", intro: intro === "full", duration: intro === "full" ? 1400 : 500 });
@@ -173,8 +193,9 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
 
     openMap: (id) => {
       if (!repo) return;
-      if (get().current?.id === id && get().view === "workspace") {
-        set({ createOpen: false });
+      const open = get().current;
+      if (open?.id === id && get().view === "workspace") {
+        set({ createOpen: false, discoverOpen: false, mode: open.workspace === "discovery" ? "discovery" : "create" });
         return;
       }
       persistNow();
@@ -217,10 +238,17 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
       }
       const maps = state.maps.filter((m) => m.id !== id);
       set({ maps });
+      // Stored article text goes with the workspace, once the undo window has passed without a restore.
+      if (snapshot?.workspace === "discovery") {
+        setTimeout(() => {
+          if (!repo?.load(id)) void contentStore().removeMap(id).catch(() => undefined);
+        }, 7000);
+      }
       if (isCurrent) {
-        const next = maps[0];
+        const sameKind = maps.find((m) => (m.workspace === "discovery") === (snapshot?.workspace === "discovery"));
+        const next = sameKind ?? maps[0];
         if (next) get().openMap(next.id);
-        else set({ ...resetGraphState([], []), current: null, view: "create", createOpen: false });
+        else set({ ...resetGraphState([], []), current: null, view: snapshot?.workspace === "discovery" ? "discover" : "create", createOpen: false, discoverOpen: false });
       }
       const title = snapshot?.title ?? "map";
       get().toast(`Deleted “${title}”`, {
@@ -258,8 +286,13 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
         return;
       }
       set({ maps: upsertMeta(get().maps, metaOf(copy)) });
-      get().openMap(copy.id);
-      get().toast(`Duplicated as “${copy.title}”`, { tone: "success" });
+      const finish = () => {
+        get().openMap(copy.id);
+        get().toast(`Duplicated as “${copy.title}”`, { tone: "success" });
+      };
+      // Research copies bring their stored article text along before opening.
+      if (copy.workspace === "discovery") void contentStore().copyMap(source.id, copy.id).catch(() => undefined).finally(finish);
+      else finish();
     },
 
     toggleStar: (id) => {
@@ -282,11 +315,13 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
 
     clearAllData: () => {
       if (!repo) return;
+      get().cancelAllJobs();
       repo.clearAll();
+      void contentStore().clear().catch(() => undefined);
       dirty = false;
       if (saveTimer) clearTimeout(saveTimer);
-      set({ ...resetGraphState([], []), maps: [], current: null, view: "create", createOpen: false, prefs: { ...DEFAULT_PREFERENCES } });
-      get().toast("All local maps were deleted from this browser.");
+      set({ ...resetGraphState([], []), maps: [], current: null, view: "create", mode: "create", createOpen: false, discoverOpen: false, prefs: { ...DEFAULT_PREFERENCES } });
+      get().toast("All local maps, research workspaces and stored article text were deleted from this browser.");
     },
 
     setViewport: (viewport) => {
@@ -302,5 +337,25 @@ export const createLibrarySlice: StateCreator<Store, [], [], LibrarySlice> = (se
     },
 
     flushSave: () => persistNow(),
+
+    openNewMap: (map) => {
+      if (!repo) return false;
+      persistNow();
+      try {
+        repo.save(map);
+        set({ maps: upsertMeta(get().maps, metaOf(map)), saveStatus: repo.persistent ? "saved" : "memory" });
+      } catch {
+        set({ saveStatus: "error" });
+        get().toast("Could not save the new workspace locally. It will stay open in this tab.", { tone: "error" });
+      }
+      loadIntoWorkspace(map, "full");
+      return true;
+    },
+
+    setResearch: (patch) => {
+      const state = get();
+      if (!state.current?.research) return;
+      set({ current: { ...state.current, research: { ...state.current.research, ...patch } }, version: state.version + 1 });
+    },
   };
 };

@@ -1,9 +1,11 @@
 import type { EdgeChange, NodeChange, Viewport } from "@xyflow/react";
-import type { IdeaData, IdeaEdge, IdeaNode, InputMode, MapMeta, MindMap, Preferences, Relation } from "@/types/graph";
+import type { IdeaData, IdeaEdge, IdeaNode, InputMode, LinkData, MapMeta, MindMap, Preferences, Relation } from "@/types/graph";
+import type { ConceptInfo, DiscoveryConfig, EdgeReview, IngestStage, ResearchMeta, SearchScope } from "@/types/research";
 import type { Emphasis } from "@/lib/graph/emphasis";
 import type { History } from "@/lib/graph/history";
 
-export type View = "loading" | "create" | "workspace";
+export type View = "loading" | "create" | "discover" | "workspace";
+export type AppMode = "create" | "discovery";
 export type SaveStatus = "saved" | "saving" | "error" | "memory";
 
 export interface Toast {
@@ -74,6 +76,10 @@ export interface GraphSlice {
   stepSearch: (direction: 1 | -1) => void;
   startLink: (sourceId: string | null) => void;
   clearFresh: () => void;
+  /** Applies a graph change as one undoable step (used by Discovery imports and reviews). */
+  commitGraph: (change: Partial<Pick<GraphSlice, "nodes" | "edges">>, coalesceKey?: string) => void;
+  /** True while nodes are being dragged or the layout is animating. */
+  isBusy: () => boolean;
 }
 
 export interface IntroPlan {
@@ -102,6 +108,60 @@ export interface LibrarySlice {
   setViewport: (viewport: Viewport) => void;
   setPrefs: (patch: Partial<Preferences>) => void;
   flushSave: () => void;
+  /** Saves a freshly built map and opens it. */
+  openNewMap: (map: MindMap) => boolean;
+  /** Updates the open workspace's research metadata (saved, not part of undo history). */
+  setResearch: (patch: Partial<ResearchMeta>) => void;
+}
+
+export type JobStage = "queued" | IngestStage | "reading" | "analyzing";
+
+export interface Job {
+  stage: JobStage;
+  startedAt: number;
+}
+
+export type ResearchFilter = "all" | "ideas" | "sources" | "concepts" | "unreviewed";
+export type ResearchTab = "search" | "sources" | "notes";
+
+export interface ResearchSlice {
+  mode: AppMode;
+  discoverOpen: boolean;
+  discoveryConfig: { status: "idle" | "loading" | "ready" | "error"; value: DiscoveryConfig | null; error?: string };
+  searchState: { status: "idle" | "searching" | "error"; more: boolean; error?: string; code?: string };
+  /** In-memory progress of imports in this tab. Never persisted: a refresh leaves sources "pending". */
+  jobs: Record<string, Job>;
+  researchFilter: ResearchFilter;
+  researchPanelOpen: boolean;
+  researchTab: ResearchTab;
+  selectedResults: string[];
+
+  openDiscover: () => void;
+  closeDiscover: () => void;
+  switchMode: (mode: AppMode) => void;
+  loadDiscoveryConfig: (force?: boolean) => void;
+  startResearch: (question: string, urlText?: string) => boolean;
+  runSearch: (query?: string, options?: { more?: boolean; scope?: SearchScope }) => Promise<void>;
+  toggleResult: (id: string) => void;
+  setSelectedResults: (ids: string[]) => void;
+  importResults: (ids: string[]) => void;
+  addSourceUrls: (text: string) => { added: number; invalid: string[]; duplicates: number };
+  addManualSource: (input: { title: string; url?: string; text: string }) => boolean;
+  setManualText: (sourceId: string, text: string) => Promise<void>;
+  processSource: (sourceId: string, options?: { refetch?: boolean }) => void;
+  processPending: () => void;
+  cancelSource: (sourceId: string) => void;
+  cancelAllJobs: () => void;
+  removeSourceNow: (sourceId: string) => void;
+  removeSourceContent: (sourceId: string) => Promise<void>;
+  setResearchNotes: (notes: string) => void;
+  setResearchFilter: (filter: ResearchFilter) => void;
+  toggleResearchPanel: (open?: boolean) => void;
+  setResearchTab: (tab: ResearchTab) => void;
+  setEdgeReview: (edgeId: string, review: EdgeReview) => void;
+  updateEdgeData: (edgeId: string, patch: Partial<LinkData>) => void;
+  updateConcept: (nodeId: string, patch: Partial<ConceptInfo>) => void;
+  connectResearch: (source: string, target: string, relation: Relation, extra?: Omit<LinkData, "relation">) => boolean;
 }
 
 export interface UiSlice {
@@ -129,4 +189,4 @@ export interface UiSlice {
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
-export type Store = GraphSlice & LibrarySlice & UiSlice;
+export type Store = GraphSlice & LibrarySlice & UiSlice & ResearchSlice;

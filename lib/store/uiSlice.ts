@@ -16,12 +16,13 @@ export const createUiSlice: StateCreator<Store, [], [], UiSlice> = (set, get) =>
   draft: { mode: "topic", input: "" },
 
   openCreate: () => {
-    if (get().view === "workspace") set({ createOpen: true });
-    else set({ view: "create" });
+    if (get().view === "workspace") set({ createOpen: true, discoverOpen: false, mode: "create" });
+    else set({ view: "create", mode: "create", discoverOpen: false });
   },
 
   closeCreate: () => {
-    if (get().current) set({ createOpen: false, view: "workspace" });
+    const current = get().current;
+    if (current) set({ createOpen: false, view: "workspace", mode: current.workspace === "discovery" ? "discovery" : "create" });
   },
 
   setDraft: (draft) => set({ draft: { ...get().draft, ...draft } }),

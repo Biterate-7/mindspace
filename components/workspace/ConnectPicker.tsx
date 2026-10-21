@@ -2,7 +2,7 @@
 
 import { Search, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { RELATIONS, type Relation } from "@/types/graph";
+import { RELATIONS, RESEARCH_RELATIONS, type Relation } from "@/types/graph";
 import { RELATION_LABELS } from "@/lib/generation/relations";
 import { neighborIds } from "@/lib/graph/ops";
 import { RELATION_COLORS } from "@/lib/space/palette";
@@ -13,9 +13,14 @@ export function ConnectPicker({ sourceId }: { sourceId: string }) {
   const nodes = useMindspace((s) => s.nodes);
   const edges = useMindspace((s) => s.edges);
   const connectNodes = useMindspace((s) => s.connectNodes);
+  const connectResearch = useMindspace((s) => s.connectResearch);
   const startLink = useMindspace((s) => s.startLink);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
   const [query, setQuery] = useState("");
   const [relation, setRelation] = useState<Relation>("related");
+  const [hypothesis, setHypothesis] = useState(false);
+  const [rationale, setRationale] = useState("");
+  const choices = discovery ? RESEARCH_RELATIONS : RELATIONS;
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -30,6 +35,12 @@ export function ConnectPicker({ sourceId }: { sourceId: string }) {
   }, [nodes, edges, sourceId, query]);
 
   const choose = (id: string) => {
+    if (discovery) {
+      // Your own links in Discovery count as reviewed, or as a hypothesis when you say so.
+      const extra = { review: hypothesis ? ("hypothesis" as const) : ("accepted" as const), ...(rationale.trim() ? { rationale: rationale.trim() } : {}) };
+      if (connectResearch(sourceId, id, relation, extra)) startLink(null);
+      return;
+    }
     if (connectNodes(sourceId, id, relation)) startLink(null);
   };
 
@@ -82,13 +93,29 @@ export function ConnectPicker({ sourceId }: { sourceId: string }) {
           style={{ color: RELATION_COLORS[relation] }}
           aria-label="Relationship type"
         >
-          {RELATIONS.map((r) => (
+          {choices.map((r) => (
             <option key={r} value={r}>
               {RELATION_LABELS[r]}
             </option>
           ))}
         </select>
       </label>
+      {discovery && (
+        <div className="mb-2 flex flex-col gap-1.5">
+          <input
+            value={rationale}
+            onChange={(e) => setRationale(e.target.value)}
+            maxLength={1000}
+            placeholder="Why do you think they're connected? (optional)"
+            aria-label="Why they are connected"
+            className="h-7 border border-line bg-void/70 px-2 text-[12px] text-ink outline-none placeholder:text-ink-3 focus:border-accent"
+          />
+          <label className="flex items-center gap-2 text-[12px] text-ink-2">
+            <input type="checkbox" checked={hypothesis} onChange={(e) => setHypothesis(e.target.checked)} className="accent-[#b39cff]" />
+            Mark as a hypothesis
+          </label>
+        </div>
+      )}
       <ul ref={listRef} className="max-h-48 overflow-y-auto" role="listbox" aria-label="Ideas">
         {options.length === 0 && <li className="px-2 py-1.5 text-[12px] text-ink-3">No matching ideas.</li>}
         {options.map((option) => {

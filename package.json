@@ -12,8 +12,10 @@
     "check": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
+    "@mozilla/readability": "0.6.0",
     "@xyflow/react": "^12.12.0",
     "html-to-image": "1.11.11",
+    "linkedom": "0.18.13",
     "lucide-react": "^1.60.0",
     "motion": "^14.4.0",
     "next": "16.4.2",

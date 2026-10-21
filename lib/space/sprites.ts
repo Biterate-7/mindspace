@@ -1,7 +1,7 @@
 import type { Category, NodeKind } from "@/types/graph";
 import { SPRITE_CELLS } from "@/lib/graph/geometry";
 import { createRng } from "@/lib/utils/random";
-import { CATEGORY_RAMPS, CORE_RAMP, type Ramp } from "./palette";
+import { CATEGORY_RAMPS, CONCEPT_RAMPS, conceptRampKey, CORE_RAMP, SOURCE_RAMP, type Ramp } from "./palette";
 
 /**
  * Procedural pixel-art sprites for celestial bodies. Sprites are built on a small
@@ -335,19 +335,93 @@ function buildMoon(ramp: Ramp, seed: number): Sprite {
   return grid.toSprite();
 }
 
+/**
+ * A source node: a small pixel satellite (a signal from outside your own thinking),
+ * with a body module, two solar wings, an antenna and a beacon light.
+ */
+function buildStation(seed: number): Sprite {
+  const size = SPRITE_CELLS.planet;
+  const c = (size - 1) / 2;
+  const grid = new PixelGrid(size);
+  const ramp = SOURCE_RAMP;
+  const wing = 2 + (seed % 2);
+  const panel = ["#7FE6F2", "#3FB7D6", "#1F6E92", "#123F5C"];
+
+  // Faint dithered signal halo.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dist = Math.hypot(x - c, y - c);
+      if (dist > 6 && dist < 9.4 && bayer(x, y) < 0.22) grid.set(x, y, ramp[2], "halo", 0.18);
+    }
+  }
+  // Solar wings on both sides, gridded like cells.
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < wing * 2; i++) {
+      const x = c + side * (4 + i);
+      for (let y = c - 2; y <= c + 2; y++) {
+        const edge = y === c - 2 || y === c + 2 || i === wing * 2 - 1;
+        const seam = i % 2 === 1 && !edge;
+        grid.set(x, y, edge ? panel[2] : seam ? panel[3] : y < c ? panel[0] : panel[1], "body");
+      }
+    }
+    grid.set(c + side * 3, c, ramp[2], "body");
+  }
+  // Body module with a lit top-left bevel.
+  for (let y = c - 3; y <= c + 3; y++) {
+    for (let x = c - 2; x <= c + 2; x++) {
+      const top = y === c - 3 || x === c - 2;
+      const bottom = y === c + 3 || x === c + 2;
+      grid.set(x, y, top ? ramp[0] : bottom ? ramp[3] : ramp[1], "body");
+    }
+  }
+  grid.set(c, c, ramp[4], "body");
+  grid.set(c - 1, c - 1, ramp[2], "body");
+  // Antenna dish and mast.
+  grid.set(c, c - 4, ramp[2], "body");
+  grid.set(c, c - 5, ramp[1], "body");
+  grid.set(c - 1, c - 6, ramp[1], "ray");
+  grid.set(c + 1, c - 6, ramp[1], "ray");
+  grid.set(c, c - 6, ramp[0], "ray");
+  // Beacon light.
+  grid.set(c, c - 7, "#5EE3F2", "glint");
+  grid.set(c, c + 4, ramp[3], "body");
+  return grid.toSprite();
+}
+
 const cache = new Map<string, Sprite>();
 
-/** Returns a memoised sprite. Seeds are folded into a small range so the cache stays tiny. */
-export function getSprite(kind: NodeKind, category: Category, seed: number): Sprite {
-  const ramp = CATEGORY_RAMPS[category];
+function spriteFor(kind: NodeKind, ramp: Ramp, rampKey: string, seed: number): Sprite {
   const folded = kind === "core" ? seed % 3 : kind === "planet" ? seed % 24 : kind === "star" ? seed % 12 : seed % 6;
-  const key = `${kind}:${kind === "core" ? "core" : category}:${folded}`;
+  const key = `${kind}:${kind === "core" ? "core" : rampKey}:${folded}`;
   const cached = cache.get(key);
   if (cached) return cached;
   const sprite =
     kind === "core" ? buildCore(folded + 1) : kind === "planet" ? buildPlanet(ramp, folded + 1) : kind === "star" ? buildStar(ramp, folded) : buildMoon(ramp, folded + 1);
   cache.set(key, sprite);
   return sprite;
+}
+
+/** Returns a memoised sprite. Seeds are folded into a small range so the cache stays tiny. */
+export function getSprite(kind: NodeKind, category: Category, seed: number): Sprite {
+  return spriteFor(kind, CATEGORY_RAMPS[category], category, seed);
+}
+
+/** Sprite for a Discovery node: satellites for sources, cool-toned bodies for concepts. */
+export function getRoleSprite(data: { kind: NodeKind; category: Category; seed: number; role?: "source" | "concept"; concept?: { type: string } }): Sprite {
+  if (data.role === "source") {
+    const key = `station:${data.seed % 2}`;
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const sprite = buildStation(data.seed % 2);
+    cache.set(key, sprite);
+    return sprite;
+  }
+  if (data.role === "concept") {
+    const rampKey = conceptRampKey(data.concept?.type ?? "concept");
+    const kind = data.kind === "core" ? "planet" : data.kind;
+    return spriteFor(kind, CONCEPT_RAMPS[rampKey], `concept-${rampKey}`, data.seed);
+  }
+  return getSprite(data.kind, data.category, data.seed);
 }
 
 const pathCache = new WeakMap<SpriteLayer, Path2D>();

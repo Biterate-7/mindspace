@@ -16,6 +16,14 @@ const TIPS = [
   "Right-click a connection to change what kind of link it is.",
 ];
 
+const DISCOVERY_TIPS = [
+  "Select a source to light up the concepts it contributed.",
+  "Dashed links are suggestions. Use the Unreviewed filter to check them.",
+  "Can't fetch a page? Paste its text from the source's inspector.",
+  "Concepts in several sources sit between them — look for the bridges.",
+  "Connect your own idea to a concept and record why you think they relate.",
+];
+
 function relativeTime(timestamp: number): string {
   const minutes = Math.round((Date.now() - timestamp) / 60000);
   if (minutes < 1) return "now";
@@ -69,16 +77,18 @@ function MapRow({ map, active, onOpen }: { map: MapMeta; active: boolean; onOpen
 }
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const maps = useMindspace((s) => s.maps);
+  const allMaps = useMindspace((s) => s.maps);
   const currentId = useMindspace((s) => s.current?.id ?? null);
-  const createOpen = useMindspace((s) => s.createOpen);
+  const mode = useMindspace((s) => s.mode);
   const openMap = useMindspace((s) => s.openMap);
   const openCreate = useMindspace((s) => s.openCreate);
-  const closeCreate = useMindspace((s) => s.closeCreate);
+  const openDiscover = useMindspace((s) => s.openDiscover);
+  const switchMode = useMindspace((s) => s.switchMode);
   const persistent = useMindspace((s) => s.storagePersistent);
-  const tip = useMemo(() => TIPS[new Date().getDate() % TIPS.length], []);
+  const discovery = mode === "discovery";
+  const tip = useMemo(() => (discovery ? DISCOVERY_TIPS : TIPS)[new Date().getDate() % (discovery ? DISCOVERY_TIPS : TIPS).length], [discovery]);
+  const maps = allMaps.filter((m) => (m.workspace === "discovery") === discovery);
   const saved = maps.filter((m) => m.starred);
-  const currentTitle = maps.find((m) => m.id === currentId)?.title;
 
   const open = (id: string) => {
     openMap(id);
@@ -92,27 +102,41 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           type="button"
           className="px-btn w-full justify-start"
           onClick={() => {
-            openCreate();
+            if (discovery) openDiscover();
+            else openCreate();
             onNavigate?.();
           }}
         >
           <Plus size={15} />
-          <span className="flex-1 text-left">New mind map</span>
+          <span className="flex-1 text-left">{discovery ? "New research" : "New mind map"}</span>
           <kbd className="px-kbd">N</kbd>
         </button>
-        <button
-          type="button"
-          className={`mt-1 flex h-9 w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors ${!createOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}
-          onClick={() => {
-            closeCreate();
-            onNavigate?.();
-          }}
-          aria-current={!createOpen ? "page" : undefined}
-        >
-          <Compass size={15} className={!createOpen ? "text-accent" : ""} />
-          <span className="flex-1 truncate">Explore</span>
-          {currentTitle && <span className="font-pixel max-w-[96px] truncate text-[7px] uppercase tracking-[0.12em] text-ink-3">current</span>}
-        </button>
+        <div className="mt-1 flex flex-col">
+          {(
+            [
+              { id: "create", label: "Create", hint: "your own maps", icon: <Compass size={15} /> },
+              { id: "discovery", label: "Discovery", hint: "research", icon: <PixelIcon name="telescope" scale={1} /> },
+            ] as const
+          ).map((item) => {
+            const active = mode === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`flex h-9 w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors ${active ? "text-ink" : "text-ink-2 hover:text-ink"}`}
+                onClick={() => {
+                  switchMode(item.id);
+                  onNavigate?.();
+                }}
+                aria-current={active ? "page" : undefined}
+              >
+                <span className={`flex w-[15px] justify-center ${active ? (item.id === "discovery" ? "text-cyan" : "text-accent") : ""}`}>{item.icon}</span>
+                <span className="flex-1 truncate">{item.label}</span>
+                <span className="font-pixel text-[7px] uppercase tracking-[0.12em] text-ink-3">{item.hint}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
