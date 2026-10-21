@@ -12,12 +12,13 @@ export function SearchBox() {
   const selectedId = useMindspace((s) => s.selectedNodeId);
   const setSearch = useMindspace((s) => s.setSearch);
   const stepSearch = useMindspace((s) => s.stepSearch);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
   const inputRef = useRef<HTMLInputElement>(null);
   const count = matches?.length ?? 0;
   const position = matches && selectedId && matches.includes(selectedId) ? index + 1 : 0;
 
   return (
-    <div className="px-panel flex h-9 w-full items-center gap-1 pl-2.5 pr-1 focus-within:border-[rgba(179,156,255,0.5)]" role="search">
+    <div className="px-panel flex h-9 w-full min-w-0 items-center gap-1 pl-2.5 pr-1 focus-within:border-[rgba(179,156,255,0.5)]" role="search">
       <Search size={14} className="shrink-0 text-ink-3" aria-hidden="true" />
       <input
         ref={inputRef}
@@ -35,8 +36,8 @@ export function SearchBox() {
             inputRef.current?.blur();
           }
         }}
-        placeholder="Search ideas"
-        aria-label="Search ideas by title or notes"
+        placeholder={discovery ? "Search sources, concepts, notes" : "Search ideas"}
+        aria-label={discovery ? "Search source titles, domains, concepts, summaries and notes" : "Search ideas by title or notes"}
         className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
         autoComplete="off"
         spellCheck={false}

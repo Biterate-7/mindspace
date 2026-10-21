@@ -3,8 +3,9 @@
 import { ConnectionMode, MiniMap, ReactFlow, useReactFlow, useStoreApi, type IsValidConnection, type MiniMapNodeProps } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IdeaEdge, IdeaNode as IdeaNodeType, Relation } from "@/types/graph";
+import { isAttribution, RELATIONS, RESEARCH_RELATIONS } from "@/types/graph";
 import { hasConnection } from "@/lib/graph/ops";
-import { categoryColor } from "@/lib/space/palette";
+import { categoryColor, ROLE_COLORS } from "@/lib/space/palette";
 import { useMindspace } from "@/lib/store";
 import { focusOn, requestDeleteNodes, requestRename, startConnect } from "@/lib/store/actions";
 import { pointerStore } from "@/lib/utils/pointer";
@@ -146,7 +147,10 @@ export function GraphCanvas() {
         onEdgeContextMenu={(event, edge) => {
           event.preventDefault();
           store.getState().selectEdge(edge.id);
-          setMenu({ type: "edge", id: edge.id, relation: edge.data?.relation ?? "related", x: event.clientX, y: event.clientY });
+          const relation = edge.data?.relation ?? "related";
+          const discovery = store.getState().current?.workspace === "discovery";
+          const relations = isAttribution(relation) ? [] : discovery ? RESEARCH_RELATIONS : RELATIONS;
+          setMenu({ type: "edge", id: edge.id, relation, x: event.clientX, y: event.clientY, relations });
         }}
         onPaneContextMenu={(event) => {
           event.preventDefault();
@@ -176,7 +180,9 @@ export function GraphCanvas() {
             zoomable
             ariaLabel="Minimap"
             nodeComponent={MiniNode}
-            nodeColor={(node) => (node.data.kind === "core" ? "#FFFFFF" : categoryColor(node.data.category))}
+            nodeColor={(node) =>
+              node.data.role === "source" ? ROLE_COLORS.source : node.data.role === "concept" ? ROLE_COLORS.concept : node.data.kind === "core" ? "#FFFFFF" : categoryColor(node.data.category)
+            }
             maskColor="rgba(3, 4, 10, 0.72)"
             style={{ width: 188, height: 132, bottom: 64, right: 16 }}
           />

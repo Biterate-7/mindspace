@@ -3,9 +3,10 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo, useMemo, useState, type CSSProperties } from "react";
 import type { IdeaNode as IdeaNodeType } from "@/types/graph";
+import { STAGE_LABELS } from "@/lib/discovery/vocabulary";
 import { labelStyle, spriteSize } from "@/lib/graph/geometry";
-import { CATEGORY_LABELS, CATEGORY_RAMPS, CORE_RAMP } from "@/lib/space/palette";
-import { getSprite } from "@/lib/space/sprites";
+import { CATEGORY_LABELS, CATEGORY_RAMPS, CONCEPT_RAMPS, CONCEPT_TYPE_LABELS, conceptRampKey, CORE_RAMP, SOURCE_RAMP } from "@/lib/space/palette";
+import { getRoleSprite } from "@/lib/space/sprites";
 import { useMindspace } from "@/lib/store";
 import { PixelSprite } from "./PixelSprite";
 
@@ -29,30 +30,71 @@ function CoreOrbits() {
   );
 }
 
+/** The tag line under a Discovery node: domain or import stage for sources, type for concepts. */
+function DiscoveryTag({ id, data, discovery }: { id: string; data: IdeaNodeType["data"]; discovery: boolean }) {
+  const stage = useMindspace((s) => (data.role === "source" ? s.jobs[id]?.stage : undefined));
+  if (data.role === "source" && data.source) {
+    const status = stage ? "working" : data.source.status;
+    const text = stage ? STAGE_LABELS[stage] : data.source.status === "failed" ? "Import failed" : data.source.status === "pending" ? "Not processed" : data.source.domain || "Pasted text";
+    return (
+      <span className="ms-tag ms-tag-source" data-status={status} style={{ "--tag-color": status === "failed" ? "#FF8A9F" : status === "working" ? "#5EE3F2" : SOURCE_RAMP[1] } as CSSProperties}>
+        {status === "working" && <i className="ms-tag-pulse" aria-hidden="true" />}
+        {text}
+      </span>
+    );
+  }
+  if (data.role === "concept" && data.concept) {
+    const count = data.concept.refs.length;
+    const ramp = CONCEPT_RAMPS[conceptRampKey(data.concept.type)];
+    return (
+      <span className="ms-tag" style={{ "--tag-color": ramp[1] } as CSSProperties}>
+        {CONCEPT_TYPE_LABELS[data.concept.type] ?? "Concept"}
+        {count > 1 && <span className="ms-tag-count"> · {count} sources</span>}
+        {count === 0 && <span className="ms-tag-count"> · no source</span>}
+      </span>
+    );
+  }
+  if (discovery && data.kind !== "core") {
+    return (
+      <span className="ms-tag" style={{ "--tag-color": CATEGORY_RAMPS[data.category][1] } as CSSProperties}>
+        {data.kind === "planet" ? `My ${CATEGORY_LABELS[data.category].toLowerCase()}` : "My idea"}
+      </span>
+    );
+  }
+  return null;
+}
+
 function IdeaNodeComponent({ id, data }: NodeProps<IdeaNodeType>) {
   const emphasis = useMindspace((s) => s.emphasis.nodes[id] ?? "n");
   const introDelay = useMindspace((s) => s.intro?.nodes[id]);
   const leaving = useMindspace((s) => s.leaving[id] === true);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
+  const working = useMindspace((s) => data.role === "source" && Boolean(s.jobs[id]));
   // Freeze the entrance at mount so later store changes never restart the animation.
   const [entrance] = useState(() => (introDelay !== undefined ? { className: "ms-appear", delay: introDelay } : { className: "ms-new", delay: 0 }));
 
-  const { kind, category, seed, label } = data;
-  const sprite = useMemo(() => getSprite(kind, category, seed), [kind, category, seed]);
+  const { kind, category, seed, label, role } = data;
+  const conceptType = data.concept?.type;
+  const sprite = useMemo(() => getRoleSprite({ kind, category, seed, role, concept: conceptType ? { type: conceptType } : undefined }), [kind, category, seed, role, conceptType]);
   const size = spriteSize(kind);
-  const ramp = kind === "core" ? CORE_RAMP : CATEGORY_RAMPS[category];
+  const ramp = role === "source" ? SOURCE_RAMP : role === "concept" ? CONCEPT_RAMPS[conceptRampKey(conceptType ?? "concept")] : kind === "core" ? CORE_RAMP : CATEGORY_RAMPS[category];
   const style = labelStyle(kind);
-  const moon = kind === "planet" && seed % 3 === 1;
+  const moon = !role && kind === "planet" && seed % 3 === 1;
+  const showTag = role || (discovery && kind !== "core") || kind === "planet";
 
   return (
     <div
       className="ms-node"
       data-kind={kind}
+      data-role={role ?? "idea"}
       data-emph={emphasis}
+      data-working={working ? "true" : undefined}
+      data-status={role === "source" ? data.source?.status : undefined}
       style={
         {
           width: size,
           height: size,
-          "--glow": withAlpha(kind === "core" ? "#B39CFF" : ramp[2], kind === "core" ? 0.42 : 0.5),
+          "--glow": withAlpha(kind === "core" && !role ? "#B39CFF" : ramp[2], kind === "core" ? 0.42 : 0.5),
           "--label-gap": `${style.gap}px`,
           "--label-max": `${style.maxWidth}px`,
         } as CSSProperties
@@ -61,12 +103,13 @@ function IdeaNodeComponent({ id, data }: NodeProps<IdeaNodeType>) {
       <Handle type="target" position={Position.Top} className="ms-drop" isConnectableStart={false} aria-label={`Connect to ${label}`} />
       <div className={`absolute inset-0 ${leaving ? "ms-leaving" : entrance.className}`} style={{ "--appear-delay": `${entrance.delay}ms` } as CSSProperties}>
         <div className="ms-glow" aria-hidden="true" />
-        {kind === "core" && <CoreOrbits />}
+        {kind === "core" && !role && <CoreOrbits />}
         {moon && (
           <div className="ms-orbit" style={{ "--orbit-duration": `${9 + (seed % 6)}s`, inset: "-24%" } as CSSProperties} aria-hidden="true">
             <i style={{ "--particle": ramp[1], width: 4, height: 4 } as CSSProperties} />
           </div>
         )}
+        {role === "source" && <div className="ms-scan ms-noexport" aria-hidden="true" />}
         <div className="ms-sprite">
           <PixelSprite sprite={sprite} size={size} />
         </div>
@@ -81,11 +124,14 @@ function IdeaNodeComponent({ id, data }: NodeProps<IdeaNodeType>) {
           <div className="ms-label" title={label.length > 40 ? label : undefined}>
             {label}
           </div>
-          {kind === "planet" && (
-            <span className="ms-tag" style={{ "--tag-color": ramp[1] } as CSSProperties}>
-              {CATEGORY_LABELS[category]}
-            </span>
-          )}
+          {showTag &&
+            (role || discovery ? (
+              <DiscoveryTag id={id} data={data} discovery={discovery} />
+            ) : (
+              <span className="ms-tag" style={{ "--tag-color": ramp[1] } as CSSProperties}>
+                {CATEGORY_LABELS[category]}
+              </span>
+            ))}
         </div>
       </div>
       <Handle type="source" position={Position.Right} className="ms-port" aria-label={`Drag to connect ${label}`} title="Drag to connect" />

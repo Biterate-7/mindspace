@@ -3,6 +3,7 @@
 import { EdgeLabelRenderer, useInternalNode, type EdgeProps, type InternalNode } from "@xyflow/react";
 import { memo, useState, type CSSProperties } from "react";
 import type { IdeaEdge, IdeaNode } from "@/types/graph";
+import { isAttribution } from "@/types/graph";
 import { edgeGeometry } from "@/lib/graph/edgeGeometry";
 import { bodyRadius, spriteSize } from "@/lib/graph/geometry";
 import { RELATION_LABELS } from "@/lib/generation/relations";
@@ -19,7 +20,7 @@ function centerOf(node: InternalNode<IdeaNode>) {
   };
 }
 
-const DIRECTED = new Set(["causes", "supports", "example"]);
+const DIRECTED = new Set(["causes", "supports", "example", "believes"]);
 
 function CosmicEdgeComponent({ id, source, target, data, selected }: EdgeProps<IdeaEdge>) {
   const sourceNode = useInternalNode<IdeaNode>(source);
@@ -37,13 +38,18 @@ function CosmicEdgeComponent({ id, source, target, data, selected }: EdgeProps<I
   const geometry = edgeGeometry(id, centerOf(sourceNode), centerOf(targetNode), bodyRadius(sourceNode.data.kind), bodyRadius(targetNode.data.kind));
   const highlighted = emphasis.includes("h") || Boolean(selected);
   const hash = hashString(id);
-  const pulses = !reducedMotion && (highlighted || hash % 4 === 0);
+  const attribution = isAttribution(relation);
+  const review = attribution ? undefined : data?.review;
+  const pulses = !reducedMotion && (highlighted || (!attribution && hash % 4 === 0));
   const duration = highlighted ? 3.2 : 7 + (hash % 5);
   const begin = highlighted ? 0 : (hash % 60) / 10;
-  const dashed = relation === "contrasts";
+  // Attribution is a faint dotted signal line; unreviewed suggestions and hypotheses are dashed.
+  const dash = attribution ? "1.5 4" : review === "unreviewed" ? "6 4" : review === "hypothesis" ? "2 3" : relation === "contrasts" ? "5 4" : undefined;
+  const dashed = dash !== undefined;
   // Generic links stay unlabelled unless the connection itself is selected; typed links always say what they are.
-  const showLabel = relation !== "related" || Boolean(selected);
-  const baseOpacity = relation === "related" ? 0.34 : 0.5;
+  const showLabel = attribution ? Boolean(selected) || emphasis.includes("h") : relation !== "related" || Boolean(selected) || review === "hypothesis";
+  const baseOpacity = attribution ? 0.3 : relation === "related" ? 0.34 : 0.5;
+  const labelText = `${review === "hypothesis" ? "Hypothesis · " : ""}${RELATION_LABELS[relation]}${review === "unreviewed" ? " ?" : ""}`;
 
   return (
     <>
@@ -53,12 +59,14 @@ function CosmicEdgeComponent({ id, source, target, data, selected }: EdgeProps<I
           d={geometry.d}
           pathLength={dashed ? undefined : 1}
           className={`ms-edge-path ${dashed ? "ms-fade-in" : "ms-draw"}`}
-          style={{ stroke: color, strokeOpacity: baseOpacity, strokeWidth: 1.4, strokeDasharray: dashed ? "5 4" : undefined, "--draw-delay": `${drawDelay}ms` } as CSSProperties}
+          data-attribution={attribution ? "true" : undefined}
+          style={{ stroke: color, strokeOpacity: baseOpacity, strokeWidth: attribution ? 1.2 : 1.4, strokeDasharray: dash, "--draw-delay": `${drawDelay}ms` } as CSSProperties}
         />
         <g className="ms-fade-in" style={{ "--draw-delay": `${drawDelay + 500}ms` } as CSSProperties}>
-          {geometry.sparks.map((p, i) => (
-            <rect key={i} x={Math.round(p.x) - 1} y={Math.round(p.y) - 1} width={2} height={2} fill={color} fillOpacity={highlighted ? 0.9 : 0.45} />
-          ))}
+          {!attribution &&
+            geometry.sparks.map((p, i) => (
+              <rect key={i} x={Math.round(p.x) - 1} y={Math.round(p.y) - 1} width={2} height={2} fill={color} fillOpacity={highlighted ? 0.9 : 0.45} />
+            ))}
           {DIRECTED.has(relation) && (
             <g transform={`translate(${geometry.head.x} ${geometry.head.y}) rotate(${geometry.head.angle})`}>
               <path d="M-4 -4h2v2h-2zM-2 -2h2v2h-2zM0 -1h1v2h-1zM-2 0h2v2h-2zM-4 2h2v2h-2z" fill={color} fillOpacity={highlighted ? 1 : 0.7} shapeRendering="crispEdges" />
@@ -81,10 +89,10 @@ function CosmicEdgeComponent({ id, source, target, data, selected }: EdgeProps<I
             data-selected={selected ? "true" : "false"}
             style={{ transform: `translate(-50%, -50%) translate(${geometry.mid.x}px, ${geometry.mid.y}px)`, "--relation-color": color } as CSSProperties}
             onClick={() => selectEdge(id)}
-            aria-label={`Connection: ${sourceNode.data.label} ${RELATION_LABELS[relation]} ${targetNode.data.label}`}
+            aria-label={`Connection: ${sourceNode.data.label} ${RELATION_LABELS[relation]} ${targetNode.data.label}${review === "unreviewed" ? " (unreviewed suggestion)" : review === "hypothesis" ? " (hypothesis)" : ""}`}
           >
             <span className="ms-fade-in block" style={{ "--draw-delay": `${drawDelay + 450}ms` } as CSSProperties}>
-              {RELATION_LABELS[relation]}
+              {labelText}
             </span>
           </button>
         </EdgeLabelRenderer>

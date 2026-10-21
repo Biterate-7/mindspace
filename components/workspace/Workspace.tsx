@@ -4,6 +4,8 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { ChevronUp, PanelRightOpen, Redo2, Undo2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { FilterBar } from "@/components/discovery/FilterBar";
+import { ResearchPanel } from "@/components/discovery/ResearchPanel";
 import { CanvasControls } from "@/components/graph/CanvasControls";
 import { CanvasToolbar } from "@/components/graph/CanvasToolbar";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
@@ -150,15 +152,20 @@ export function Workspace() {
   const hasSelection = useMindspace((s) => Boolean(s.selectedNodeId || s.selectedEdgeId));
   const undo = useMindspace((s) => s.undo);
   const redo = useMindspace((s) => s.redo);
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
+  const researchPanelOpen = useMindspace((s) => s.researchPanelOpen);
+  const toggleResearchPanel = useMindspace((s) => s.toggleResearchPanel);
   const showInspectorRail = desktop || (tablet && hasSelection);
+  // In Discovery the research panel takes the left rail; the maps list becomes a slide-over.
+  const inlineSidebar = desktop && !discovery;
 
   return (
     <ReactFlowProvider>
       <motion.div className="flex h-dvh flex-col bg-void" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
         <TopBar compact={!tablet} />
         <div className="relative flex min-h-0 flex-1">
-          {/* Sidebar: inline on desktop, slide-over below. */}
-          {desktop ? (
+          {/* Sidebar: inline on desktop, slide-over below (and always in Discovery). */}
+          {inlineSidebar ? (
             <motion.div
               className="relative z-20 shrink-0 overflow-hidden"
               initial={false}
@@ -196,15 +203,58 @@ export function Workspace() {
             </AnimatePresence>
           )}
 
+          {discovery &&
+            (desktop ? (
+              <motion.div className="relative z-20 shrink-0 overflow-hidden" initial={false} animate={{ width: researchPanelOpen ? 344 : 0 }} transition={{ duration: 0.26, ease: PANEL_EASE }}>
+                <div className="h-full w-[344px]">
+                  <ResearchPanel onClose={() => toggleResearchPanel(false)} />
+                </div>
+              </motion.div>
+            ) : (
+              <AnimatePresence>
+                {researchPanelOpen && (
+                  <>
+                    <motion.button
+                      type="button"
+                      aria-label="Close research panel"
+                      className="absolute inset-0 z-40 bg-void/60"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      onClick={() => toggleResearchPanel(false)}
+                    />
+                    <motion.div
+                      className="absolute inset-y-0 left-0 z-50 w-[360px] max-w-[92vw]"
+                      initial={{ x: -380 }}
+                      animate={{ x: 0 }}
+                      exit={{ x: -380 }}
+                      transition={{ duration: 0.26, ease: PANEL_EASE }}
+                    >
+                      <ResearchPanel onClose={() => toggleResearchPanel(false)} />
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            ))}
+
           <main className="relative min-w-0 flex-1 overflow-hidden">
             <GraphCanvas />
-            {nodeCount === 0 && <EmptyCanvas />}
+            {nodeCount === 0 && !discovery && <EmptyCanvas />}
 
             <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-3">
-              <div className="pointer-events-auto w-full max-w-[300px]">
+              <div className={`pointer-events-auto flex w-full items-center gap-1.5 ${discovery && !desktop ? "max-w-[420px]" : "max-w-[300px]"}`}>
+                {discovery && !researchPanelOpen && (
+                  <Tooltip label="Show research panel" side="bottom">
+                    <button type="button" className="px-panel px-icon-btn h-9 w-9 shrink-0" onClick={() => toggleResearchPanel(true)} aria-label="Show research panel">
+                      <PixelIcon name="telescope" scale={1} className="text-cyan" />
+                    </button>
+                  </Tooltip>
+                )}
                 <SearchBox />
+                {discovery && !desktop && <FilterBar compact />}
               </div>
-              <div className="flex flex-1 justify-center">
+              <div className="flex flex-1 flex-col items-center gap-2">
+                {discovery && desktop && <FilterBar />}
                 <LinkBanner />
               </div>
               {showInspectorRail && !inspectorOpen && (

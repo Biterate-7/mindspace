@@ -1,5 +1,6 @@
 import type { Graph, InputMode, MapMeta, MindMap, Preferences } from "@/types/graph";
 import { DEFAULT_PREFERENCES } from "@/types/graph";
+import { sanitizeResearchMeta } from "@/lib/discovery/sanitize";
 import { sanitizeGraph } from "@/lib/graph/ops";
 import type { KeyValueDriver } from "./driver";
 
@@ -24,7 +25,7 @@ export class StorageWriteError extends Error {
 const MODES: readonly InputMode[] = ["topic", "text", "dump"];
 
 export function metaOf(map: MindMap): MapMeta {
-  return {
+  const meta: MapMeta = {
     id: map.id,
     title: map.title,
     createdAt: map.createdAt,
@@ -34,6 +35,8 @@ export function metaOf(map: MindMap): MapMeta {
     edgeCount: map.edges.length,
     mode: map.source.mode,
   };
+  if (map.workspace === "discovery") meta.workspace = "discovery";
+  return meta;
 }
 
 export function serializeMap(map: MindMap): string {
@@ -62,7 +65,7 @@ export function parseMap(json: string | null): MindMap | null {
     ? { x: raw.viewport.x as number, y: raw.viewport.y as number, zoom: raw.viewport.zoom as number }
     : undefined;
   const now = Date.now();
-  return {
+  const map: MindMap = {
     id: raw.id,
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title : "Untitled map",
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : now,
@@ -75,6 +78,12 @@ export function parseMap(json: string | null): MindMap | null {
     viewport,
     ...graph,
   };
+  // Discovery workspaces carry research metadata; maps saved before Discovery have neither field.
+  if (raw.workspace === "discovery") {
+    map.workspace = "discovery";
+    map.research = sanitizeResearchMeta(raw.research);
+  }
+  return map;
 }
 
 export class MapRepository {
@@ -129,6 +138,7 @@ export class MapRepository {
       if (!isRecord(parsed)) return { ...DEFAULT_PREFERENCES };
       return {
         lastMapId: typeof parsed.lastMapId === "string" ? parsed.lastMapId : null,
+        lastResearchId: typeof parsed.lastResearchId === "string" ? parsed.lastResearchId : null,
         sidebarOpen: typeof parsed.sidebarOpen === "boolean" ? parsed.sidebarOpen : DEFAULT_PREFERENCES.sidebarOpen,
         minimapOpen: typeof parsed.minimapOpen === "boolean" ? parsed.minimapOpen : DEFAULT_PREFERENCES.minimapOpen,
         exportFrame: typeof parsed.exportFrame === "boolean" ? parsed.exportFrame : DEFAULT_PREFERENCES.exportFrame,
@@ -164,14 +174,18 @@ export class MapRepository {
       const metas = parsed.filter(
         (m): m is MapMeta => isRecord(m) && typeof m.id === "string" && typeof m.title === "string" && typeof m.updatedAt === "number",
       );
-      return metas.map((m) => ({
-        ...m,
-        starred: m.starred === true,
-        nodeCount: typeof m.nodeCount === "number" ? m.nodeCount : 0,
-        edgeCount: typeof m.edgeCount === "number" ? m.edgeCount : 0,
-        createdAt: typeof m.createdAt === "number" ? m.createdAt : m.updatedAt,
-        mode: MODES.includes(m.mode) ? m.mode : "topic",
-      }));
+      return metas.map((m) => {
+        const meta: MapMeta = {
+          ...m,
+          starred: m.starred === true,
+          nodeCount: typeof m.nodeCount === "number" ? m.nodeCount : 0,
+          edgeCount: typeof m.edgeCount === "number" ? m.edgeCount : 0,
+          createdAt: typeof m.createdAt === "number" ? m.createdAt : m.updatedAt,
+          mode: MODES.includes(m.mode) ? m.mode : "topic",
+        };
+        if (meta.workspace !== "discovery") delete meta.workspace;
+        return meta;
+      });
     } catch {
       return null;
     }

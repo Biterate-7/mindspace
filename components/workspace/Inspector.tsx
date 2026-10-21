@@ -3,20 +3,14 @@
 import { ArrowLeftRight, PanelRightClose, Trash2, Unlink } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { RELATIONS } from "@/types/graph";
+import { ConceptInspector, ResearchEdgeInspector, ResearchOverview, SourceInspector } from "@/components/discovery/Inspectors";
 import { PixelIcon } from "@/components/ui/PixelIcon";
+import { RELATION_HINTS } from "@/lib/discovery/vocabulary";
 import { RELATION_LABELS } from "@/lib/generation/relations";
 import { RELATION_COLORS } from "@/lib/space/palette";
 import { useMindspace } from "@/lib/store";
 import { requestDeleteNodes } from "@/lib/store/actions";
 import { NodeInspector } from "./NodeInspector";
-
-const RELATION_HINTS = {
-  related: "A general association between the two ideas.",
-  causes: "One idea leads to or produces the other.",
-  supports: "One idea enables or strengthens the other.",
-  example: "One idea is a concrete instance of the other.",
-  contrasts: "The ideas pull in different directions.",
-} as const;
 
 function EdgeInspector({ edgeId }: { edgeId: string }) {
   const edge = useMindspace((s) => s.edges.find((e) => e.id === edgeId));
@@ -148,6 +142,7 @@ export function Inspector({ onClose, showClose = true }: { onClose: () => void; 
   // Narrow selectors: node data objects keep their identity while nodes are dragged.
   const selectedIds = useMindspace(useShallow((s) => s.nodes.filter((n) => n.selected).map((n) => n.id)));
   const data = useMindspace((s) => (selectedNodeId ? s.nodes.find((n) => n.id === selectedNodeId)?.data : undefined));
+  const discovery = useMindspace((s) => s.current?.workspace === "discovery");
 
   return (
     <aside className="flex h-full flex-col" aria-label="Inspector">
@@ -163,9 +158,17 @@ export function Inspector({ onClose, showClose = true }: { onClose: () => void; 
         {selectedIds.length > 1 ? (
           <MultiInspector ids={selectedIds} />
         ) : selectedNodeId && data ? (
-          <NodeInspector key={selectedNodeId} id={selectedNodeId} data={data} />
+          data.role === "source" && data.source ? (
+            <SourceInspector key={selectedNodeId} id={selectedNodeId} data={data} />
+          ) : data.role === "concept" && data.concept ? (
+            <ConceptInspector key={selectedNodeId} id={selectedNodeId} data={data} />
+          ) : (
+            <NodeInspector key={selectedNodeId} id={selectedNodeId} data={data} />
+          )
         ) : selectedEdgeId ? (
-          <EdgeInspector edgeId={selectedEdgeId} />
+          discovery ? <ResearchEdgeInspector edgeId={selectedEdgeId} /> : <EdgeInspector edgeId={selectedEdgeId} />
+        ) : discovery ? (
+          <ResearchOverview />
         ) : (
           <EmptyInspector />
         )}

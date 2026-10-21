@@ -36,12 +36,47 @@ export function categoryColor(category: Category): string {
   return CATEGORY_RAMPS[category][2];
 }
 
+/**
+ * Discovery palettes. Concepts drawn from sources use a cool cyan/blue family so they
+ * read apart from your own ideas at a glance; sources are steel satellites.
+ */
+export const CONCEPT_RAMPS: Record<"idea" | "named", Ramp> = {
+  idea: ["#E6FEFF", "#9DF3FB", "#3FD3E8", "#1A8AA6", "#0B3F57"],
+  named: ["#EAF0FF", "#A9C1FF", "#6F93FF", "#3456D6", "#18257A"],
+};
+
+export const SOURCE_RAMP: Ramp = ["#F4F6FF", "#C8CFEA", "#8E98C4", "#58618F", "#2A2F4F"];
+
+const NAMED_TYPES = new Set(["person", "organization", "place", "event", "date", "entity"]);
+
+export function conceptRampKey(type: string): "idea" | "named" {
+  return NAMED_TYPES.has(type) ? "named" : "idea";
+}
+
+export const CONCEPT_TYPE_LABELS: Record<string, string> = {
+  theme: "Theme",
+  concept: "Concept",
+  person: "Person",
+  organization: "Organization",
+  place: "Place",
+  event: "Event",
+  date: "Date",
+  entity: "Name",
+};
+
+/** Legend colours for the three node families. */
+export const ROLE_COLORS = { idea: "#56DB9C", concept: "#3FD3E8", source: "#C8CFEA" } as const;
+
 export const RELATION_COLORS: Record<Relation, string> = {
   related: "#7C8CFF",
   causes: "#F27BB5",
   supports: "#58D9EA",
   example: "#8EA9FF",
   contrasts: "#F5C451",
+  contradicts: "#FF8A6B",
+  mentions: "#6FA3C7",
+  extracted: "#6FA3C7",
+  believes: "#56DB9C",
 };
 
 /** Deep-space background colours shared by the live canvas and image export. */

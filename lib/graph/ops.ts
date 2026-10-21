@@ -1,5 +1,6 @@
-import type { Category, Graph, IdeaData, IdeaEdge, IdeaNode, NodeKind, Relation } from "@/types/graph";
-import { CATEGORIES, NODE_KINDS, RELATIONS } from "@/types/graph";
+import type { Category, Graph, IdeaData, IdeaEdge, IdeaNode, LinkData, NodeKind, Relation } from "@/types/graph";
+import { CATEGORIES, NODE_KINDS } from "@/types/graph";
+import { sanitizeConceptInfo, sanitizeLinkData, sanitizeSourceInfo } from "@/lib/discovery/sanitize";
 import { findOpenPosition } from "@/lib/generation/layout";
 import { createId, hashString } from "@/lib/utils/random";
 
@@ -22,8 +23,8 @@ export function toFlowNode(node: { id: string; position: { x: number; y: number 
   return { id: node.id, type: "idea", position: { ...node.position }, data: { ...node.data } };
 }
 
-export function toFlowEdge(edge: { id: string; source: string; target: string; data?: { relation: Relation } }): IdeaEdge {
-  return { id: edge.id, source: edge.source, target: edge.target, type: "cosmic", data: { relation: edge.data?.relation ?? "related" } };
+export function toFlowEdge(edge: { id: string; source: string; target: string; data?: LinkData }): IdeaEdge {
+  return { id: edge.id, source: edge.source, target: edge.target, type: "cosmic", data: { ...edge.data, relation: edge.data?.relation ?? "related" } };
 }
 
 export function fromGraph(graph: Graph): GraphState {
@@ -34,7 +35,7 @@ export function fromGraph(graph: Graph): GraphState {
 export function toGraph(state: GraphState): Graph {
   return {
     nodes: state.nodes.map((n) => ({ id: n.id, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) }, data: { ...n.data } })),
-    edges: state.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: { relation: e.data?.relation ?? "related" } })),
+    edges: state.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: { ...e.data, relation: e.data?.relation ?? "related" } })),
   };
 }
 
@@ -99,9 +100,9 @@ export function createNode(nodes: readonly IdeaNode[], position: { x: number; y:
   };
 }
 
-export function createEdge(edges: readonly IdeaEdge[], source: string, target: string, relation: Relation = "related"): IdeaEdge {
+export function createEdge(edges: readonly IdeaEdge[], source: string, target: string, relation: Relation = "related", extra: Omit<LinkData, "relation"> = {}): IdeaEdge {
   const taken = new Set(edges.map((e) => e.id));
-  return { id: createId("e", taken), source, target, type: "cosmic", data: { relation } };
+  return { id: createId("e", taken), source, target, type: "cosmic", data: { ...extra, relation } };
 }
 
 /** Adds a child idea next to `parentId`, opening away from the core so branches keep growing outward. */
@@ -131,12 +132,12 @@ export function addStandalone(state: GraphState, position: { x: number; y: numbe
 
 export type ConnectResult = { ok: true; edges: IdeaEdge[]; createdId: string } | { ok: false; reason: "self" | "duplicate" | "missing" };
 
-export function connect(state: GraphState, source: string, target: string, relation: Relation = "related"): ConnectResult {
+export function connect(state: GraphState, source: string, target: string, relation: Relation = "related", extra: Omit<LinkData, "relation"> = {}): ConnectResult {
   if (source === target) return { ok: false, reason: "self" };
   const ids = new Set(state.nodes.map((n) => n.id));
   if (!ids.has(source) || !ids.has(target)) return { ok: false, reason: "missing" };
   if (hasConnection(state.edges, source, target)) return { ok: false, reason: "duplicate" };
-  const edge = createEdge(state.edges, source, target, relation);
+  const edge = createEdge(state.edges, source, target, relation, extra);
   return { ok: true, edges: [...state.edges, edge], createdId: edge.id };
 }
 
@@ -158,7 +159,17 @@ export function updateNodeData(nodes: readonly IdeaNode[], id: string, patch: Pa
 }
 
 export function setEdgeRelation(edges: readonly IdeaEdge[], id: string, relation: Relation): IdeaEdge[] {
-  return edges.map((e) => (e.id === id ? { ...e, data: { relation } } : e));
+  return edges.map((e) => (e.id === id ? { ...e, data: { ...e.data, relation } } : e));
+}
+
+/** Merges fields into a link's data. `undefined` values remove a field. */
+export function updateEdgeData(edges: readonly IdeaEdge[], id: string, patch: Partial<LinkData>): IdeaEdge[] {
+  return edges.map((e) => {
+    if (e.id !== id) return e;
+    const data: LinkData = { ...(e.data ?? { relation: "related" }), ...patch };
+    for (const key of Object.keys(data) as Array<keyof LinkData>) if (data[key] === undefined) delete data[key];
+    return { ...e, data };
+  });
 }
 
 export function reverseEdge(edges: readonly IdeaEdge[], id: string): IdeaEdge[] {
@@ -191,17 +202,22 @@ export function sanitizeGraph(graph: Graph): Graph {
     if (!n || typeof n.id !== "string" || seen.has(n.id) || typeof n.data !== "object" || n.data === null) continue;
     seen.add(n.id);
     const position = Number.isFinite(n.position?.x) && Number.isFinite(n.position?.y) ? { x: n.position.x, y: n.position.y } : { x: 0, y: 0 };
-    nodes.push({
-      id: n.id,
-      position,
-      data: {
-        label: typeof n.data.label === "string" && n.data.label.trim() ? n.data.label : "Untitled idea",
-        notes: typeof n.data.notes === "string" ? n.data.notes : "",
-        category: CATEGORIES.includes(n.data.category) ? n.data.category : "idea",
-        kind: NODE_KINDS.includes(n.data.kind) ? n.data.kind : "star",
-        seed: Number.isFinite(n.data.seed) ? n.data.seed : hashString(n.id),
-      },
-    });
+    const data: IdeaData = {
+      label: typeof n.data.label === "string" && n.data.label.trim() ? n.data.label : "Untitled idea",
+      notes: typeof n.data.notes === "string" ? n.data.notes : "",
+      category: CATEGORIES.includes(n.data.category) ? n.data.category : "idea",
+      kind: NODE_KINDS.includes(n.data.kind) ? n.data.kind : "star",
+      seed: Number.isFinite(n.data.seed) ? n.data.seed : hashString(n.id),
+    };
+    // Discovery roles survive only with valid details; otherwise the node becomes a plain idea.
+    if (n.data.role === "source") {
+      const source = sanitizeSourceInfo(n.data.source);
+      if (source) Object.assign(data, { role: "source", source });
+    } else if (n.data.role === "concept") {
+      const concept = sanitizeConceptInfo(n.data.concept);
+      if (concept) Object.assign(data, { role: "concept", concept });
+    }
+    nodes.push({ id: n.id, position, data });
   }
   const pairs = new Set<string>();
   const edgeIds = new Set<string>();
@@ -212,7 +228,7 @@ export function sanitizeGraph(graph: Graph): Graph {
     if (pairs.has(key)) continue;
     pairs.add(key);
     edgeIds.add(e.id);
-    edges.push({ id: e.id, source: e.source, target: e.target, data: { relation: RELATIONS.includes(e.data?.relation) ? e.data.relation : "related" } });
+    edges.push({ id: e.id, source: e.source, target: e.target, data: sanitizeLinkData(e.data) });
   }
   return { nodes, edges };
 }

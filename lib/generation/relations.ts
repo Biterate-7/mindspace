@@ -68,6 +68,10 @@ export const RELATION_LABELS: Record<Relation, string> = {
   supports: "supports",
   example: "example of",
   contrasts: "contrasts with",
+  contradicts: "contradicts",
+  mentions: "mentioned in",
+  extracted: "extracted from",
+  believes: "user believes",
 };
 
 const IMPACT_WORDS = /\b(effects?|impacts?|consequences?|risks?|benefits?|costs?|loss|losses|growth|decline|damage|harm|outcomes?|results?|improvements?|failure|success|crisis|problems?|threats?|opportunit(y|ies)|inequality|burnout)\b/i;
