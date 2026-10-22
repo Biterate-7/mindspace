@@ -1,8 +1,23 @@
 import type { Relation } from "@/types/graph";
-import type { EdgeReview, IngestErrorCode } from "@/types/research";
+import type { EdgeReview, IngestErrorCode, SearchProviderId } from "@/types/research";
 import type { JobStage } from "@/lib/store/types";
 
 /** Shared user-facing wording for Discovery. */
+
+export const PROVIDER_LABELS: Record<SearchProviderId, string> = {
+  brave: "Brave Search",
+  tavily: "Tavily",
+  wikipedia: "Wikipedia",
+  openalex: "OpenAlex",
+  arxiv: "arXiv",
+  europepmc: "Europe PMC",
+  gdelt: "GDELT news",
+  hackernews: "Hacker News",
+  github: "GitHub",
+  stackexchange: "Stack Overflow",
+  federalregister: "Federal Register",
+  worldbank: "World Bank",
+};
 
 export const RELATION_HINTS: Record<Relation, string> = {
   related: "A general association between the two ideas.",
@@ -12,7 +27,8 @@ export const RELATION_HINTS: Record<Relation, string> = {
   contrasts: "The ideas pull in different directions.",
   contradicts: "The two claims cannot both be true as stated.",
   mentions: "The concept appears in this source.",
-  extracted: "The concept was first found in this source.",
+  extracted: "Found first in this source (concepts) or quoted from it (claims).",
+  evidence: "This quoted claim mentions the concept — evidence about it from its source.",
   believes: "Your own asserted link — record why you think it holds.",
 };
 

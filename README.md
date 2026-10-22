@@ -50,22 +50,40 @@ Relationships are suggestions, not facts; every one can be inspected, retyped or
 
 Open **Discovery** (telescope icon in the top bar or sidebar) and ask a question — *“Why did the Treaty of Versailles contribute to World War II?”*.
 
-1. **Search.** The server queries the configured provider and returns real results: titles, links, snippets and dates exactly as the provider reports them (snippets are labelled as snippets, not article content). Results are deduplicated by normalised URL and ranked by provider order, question relevance and domain diversity. *More results* and concept-based follow-up searches find additional sources.
-2. **Import.** Pick results, paste URLs, or paste text yourself. Each import shows its real stage — checking robots.txt, fetching, extracting, extracting concepts — and can be cancelled. Failures (blocked, not found, paywalled, robots-disallowed, unsupported file, timeout) are explained per source and never affect the others; failed pages can be retried or replaced with pasted text, which is recorded as *pasted by you*.
-3. **Map.** Each source becomes a satellite; its concepts (themes, people, organisations, places, events, dates) become planets linked back by *extracted from* / *mentioned in* attribution links. A concept found in several sources is one node with one link per source, placed between them. Every concept keeps the verbatim passages it came from.
+1. **Search.** The question is turned into a research plan (`lib/discovery/plan.ts`): topic facets (science, health, software, technology, current events, economics, policy, history) and several complementary queries — the question as written for web engines plus an angle suited to the topic, and its key terms for keyword indexes. The plan goes in parallel to every provider that fits the topic (see below); each has its own timeout and one retry, and its outcome — results, empty, failed, timed out, rate limited or not relevant — is shown as it streams in. Results are the providers' own titles, links, snippets, abstracts, authors and dates (labelled as such, never as article content), merged by identity (normalised URL, DOI, arXiv id, PubMed id, repository), with syndicated copies collapsed, then ranked by question relevance, source credibility, topic fit and recency, and picked for diversity (repeat sites are penalised and Wikipedia is limited to a few results). Each result is labelled with its kind of publisher (research, news, government, docs, code, discussion, reference…) and evidence role (primary, secondary, reference, opinion) — heuristics with their reasons shown, not verdicts.
+2. **Import.** By default a new question imports the top 8 results from different sites automatically; you can also pick results, paste URLs, or paste text yourself. Each import shows its real stage — checking robots.txt, fetching, extracting, extracting concepts — and can be cancelled. Failures (blocked, not found, paywalled, robots-disallowed, unsupported file, timeout) are explained per source and never affect the others. When a paper's page can't be read but a scholarly index supplied its abstract, the abstract is analysed instead and the source says so; otherwise its metadata and link are kept and nothing is pretended. Failed pages can be retried or replaced with pasted text, recorded as *pasted by you*. Asking the same question again reopens its galaxy and adds only sources it doesn't already have.
+3. **Map.** Each source becomes a satellite tagged with its kind and site; its concepts (themes, people, organisations, places, events, dates) become planets linked back by *extracted from* / *mentioned in* attribution links, and its strongest argument sentences that name those concepts become amber *claim* moons — verbatim quotes linked to the source(s) they come from and, by *evidence* links, to the concepts they are about. A concept or claim found in several sources is one node with one link per source, placed between them.
 4. **Think and review.** Add your own ideas, connect them to concepts (optionally as a *hypothesis*, with your reasoning), and review every suggested link — automatic links start *unreviewed* and show the sentence that suggested them. Filters (my ideas · sources · concepts · unreviewed) dim everything else; selecting a source lights up its concepts, selecting a concept shows its sources and passages.
 5. **Keep.** Workspaces autosave like maps and reopen later. Export a PNG of the galaxy, structured JSON (quoted source content, notes and article text are each opt-in), or copy the source list as Markdown.
 
 ### Search providers
+
+Without any key, Discovery searches these free, public APIs — each only when the topic calls for it:
+
+| Provider | Covers | Used for |
+| --- | --- | --- |
+| OpenAlex | 250M+ scholarly works, every discipline (with abstracts) | almost every topic |
+| arXiv | physics, maths, CS, quantitative biology/finance, economics preprints | science, technology, economics |
+| Europe PMC | life sciences and biomedicine, including all of PubMed | health and biology |
+| GDELT | worldwide online news, last three months | current events, policy |
+| Hacker News | the articles, explainers and engineering posts people discuss | science, technology, software |
+| GitHub · Stack Overflow | repositories and programming Q&A | software |
+| Federal Register · World Bank | US federal documents; development research and reports | economics, policy |
+| Wikipedia | reference — one source among many | every topic, capped |
+
+General web search adds the broadest coverage (any website: official documentation, news sites, government and university pages) and is strongly recommended:
 
 | Variable | Effect |
 | --- | --- |
 | `BRAVE_SEARCH_API_KEY` | Web search with the [Brave Search API](https://api-dashboard.search.brave.com). |
 | `TAVILY_API_KEY` | Web search with [Tavily](https://app.tavily.com). |
 | `DISCOVERY_SEARCH_PROVIDER` | `brave` (default) or `tavily` when both keys are set. |
+| `OPENALEX_API_KEY`, `GITHUB_TOKEN`, `STACKEXCHANGE_KEY` | Optional: raise those providers' anonymous quotas. |
+| `DISCOVERY_CONTACT_EMAIL` | Optional: sent to OpenAlex as `mailto`. |
+| `DISCOVERY_DISABLE_PROVIDERS` | Comma-separated provider ids to turn off. |
 | `DISCOVERY_DISABLE_WIKIPEDIA` | `1` turns off the keyless Wikipedia search. |
 
-Copy `.env.example` to `.env.local`, add a key and restart `npm run dev`. Without a web key, Discovery says so, searches **Wikipedia only** (no key required), and URL import and pasted text work fully. Keys are read only in server route handlers and are never sent to the browser; `/api/discovery/config` reports provider names, not keys. Providers live behind one interface in `lib/discovery/server/search.ts`, so adding another is a single adapter.
+Copy `.env.example` to `.env.local`, add a key and restart `npm run dev`. Keys are read only in server route handlers and are never sent to the browser; `/api/discovery/config` reports provider names, not keys. Every provider is one adapter behind the `SearchProvider` interface (`lib/discovery/server/providers/`), registered in `lib/discovery/server/search.ts`; the federated search (`federated.ts`) and ranking (`lib/discovery/rank.ts`, `classify.ts`) need no changes to add one. Provider pages and fetched articles are cached in server memory (10 and 30 minutes) so re-running research doesn't repeat requests. Results are never scraped from search-engine pages, and paywalls, logins and CAPTCHAs are never bypassed.
 
 ### How concepts are extracted
 
@@ -103,7 +121,8 @@ lib/export/              export geometry (pure) and PNG rendering
 app/api/discovery/       config, search and ingest route handlers (server only)
 components/discovery/    launch screen, research panel, filters, source/concept/link inspectors, data export
 lib/discovery/           URL helpers, ranking, local analysis, graph merge/removal, research layout, content store, export
-lib/discovery/server/    SSRF-safe fetching, robots.txt, article extraction, search providers, rate limiting
+lib/discovery/server/    SSRF-safe fetching, robots.txt, article extraction, federated search, provider registry, caching, rate limiting
+lib/discovery/server/providers/  one adapter per search API (web, scholarly, news, technical, government)
 lib/store/               zustand store (graph, library/persistence, UI slices)
 tests/                   Vitest suites for generation, layout, editing, history, storage, export
 ```

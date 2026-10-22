@@ -27,6 +27,7 @@ export function buildResearchExport(map: Pick<MindMap, "id" | "title" | "created
   const ideas = nodes.filter((n) => !n.data.role);
   const sources = nodes.filter((n) => n.data.role === "source" && n.data.source);
   const concepts = nodes.filter((n) => n.data.role === "concept" && n.data.concept);
+  const claims = nodes.filter((n) => n.data.role === "claim" && n.data.claim);
   return {
     format: EXPORT_FORMAT,
     exportedAt: new Date().toISOString(),
@@ -57,6 +58,15 @@ export function buildResearchExport(map: Pick<MindMap, "id" | "title" | "created
         domain: s.domain,
         siteName: s.siteName ?? null,
         author: s.byline ?? null,
+        authors: s.authors ?? [],
+        venue: s.venue ?? null,
+        doi: s.doi ?? null,
+        sourceType: s.category ?? null,
+        evidenceRole: s.sourceRole ?? null,
+        preprint: Boolean(s.preprint),
+        citedBy: s.citedBy ?? null,
+        foundBy: s.providers ?? [],
+        qualitySignals: s.signals ?? [],
         publishedAt: s.publishedAt ?? null,
         publishedAtSource: s.publishedFrom ?? null,
         retrievedAt: s.retrievedAt ? new Date(s.retrievedAt).toISOString() : null,
@@ -64,9 +74,10 @@ export function buildResearchExport(map: Pick<MindMap, "id" | "title" | "created
         error: s.error ?? null,
         addedVia: s.origin,
         textOrigin: s.textOrigin ?? null,
+        ...(s.accessError ? { fullTextError: s.accessError } : {}),
         analysis: s.analysis ?? null,
         wordCount: s.wordCount ?? null,
-        ...(includePassages ? { summary: s.summary ?? null, summaryKind: s.summaryKind ?? null, keyPassages: s.keyPassages ?? [], searchSnippet: s.snippet ?? null } : {}),
+        ...(includePassages ? { summary: s.summary ?? null, summaryKind: s.summaryKind ?? null, keyPassages: s.keyPassages ?? [], searchSnippet: s.snippet ?? null, abstract: s.abstract ?? null } : {}),
         ...(includeNotes && n.data.notes ? { notes: n.data.notes } : {}),
         ...(articleText?.[n.id] ? { articleText: articleText[n.id] } : {}),
         position: n.position,
@@ -81,6 +92,18 @@ export function buildResearchExport(map: Pick<MindMap, "id" | "title" | "created
         review: c.review,
         ...(c.description && (includePassages || c.descriptionKind === "user") ? { description: c.description, descriptionKind: c.descriptionKind ?? null } : {}),
         sources: c.refs.map((r) => ({ sourceId: r.sourceId, mentions: r.mentions, ...(includePassages ? { passages: r.passages } : {}), ...(r.tension ? { contrastingLanguage: true } : {}) })),
+        ...(includeNotes && n.data.notes ? { notes: n.data.notes } : {}),
+        position: n.position,
+      };
+    }),
+    claims: claims.map((n) => {
+      const c = n.data.claim!;
+      return {
+        id: n.id,
+        // A claim is a quoted passage, so its text counts as quoted source content.
+        ...(includePassages ? { text: c.text } : { label: n.data.label.length > 60 ? `${n.data.label.slice(0, 59)}…` : n.data.label }),
+        sourceIds: c.sourceIds,
+        review: c.review,
         ...(includeNotes && n.data.notes ? { notes: n.data.notes } : {}),
         position: n.position,
       };

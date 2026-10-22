@@ -3,9 +3,10 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo, useMemo, useState, type CSSProperties } from "react";
 import type { IdeaNode as IdeaNodeType } from "@/types/graph";
+import { CATEGORY_LABELS as SOURCE_CATEGORY_LABELS } from "@/lib/discovery/classify";
 import { STAGE_LABELS } from "@/lib/discovery/vocabulary";
 import { labelStyle, spriteSize } from "@/lib/graph/geometry";
-import { CATEGORY_LABELS, CATEGORY_RAMPS, CONCEPT_RAMPS, CONCEPT_TYPE_LABELS, conceptRampKey, CORE_RAMP, SOURCE_RAMP } from "@/lib/space/palette";
+import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_RAMPS, CLAIM_RAMP, CONCEPT_RAMPS, CONCEPT_TYPE_LABELS, conceptRampKey, CORE_RAMP, SOURCE_RAMP } from "@/lib/space/palette";
 import { getRoleSprite } from "@/lib/space/sprites";
 import { useMindspace } from "@/lib/store";
 import { PixelSprite } from "./PixelSprite";
@@ -30,14 +31,18 @@ function CoreOrbits() {
   );
 }
 
-/** The tag line under a Discovery node: domain or import stage for sources, type for concepts. */
+/** The tag line under a Discovery node: kind and domain or import stage for sources, type for concepts, provenance for claims. */
 function DiscoveryTag({ id, data, discovery }: { id: string; data: IdeaNodeType["data"]; discovery: boolean }) {
   const stage = useMindspace((s) => (data.role === "source" ? s.jobs[id]?.stage : undefined));
   if (data.role === "source" && data.source) {
     const status = stage ? "working" : data.source.status;
-    const text = stage ? STAGE_LABELS[stage] : data.source.status === "failed" ? "Import failed" : data.source.status === "pending" ? "Not processed" : data.source.domain || "Pasted text";
+    const kind = data.source.category ? `${SOURCE_CATEGORY_LABELS[data.source.category]} · ` : "";
+    // A DOI resolver address says nothing about the publisher; show the name the index gave instead.
+    const site = /doi\.org$/.test(data.source.domain) && data.source.siteName ? data.source.siteName : data.source.domain;
+    const text = stage ? STAGE_LABELS[stage] : data.source.status === "failed" ? "Import failed" : data.source.status === "pending" ? "Not processed" : `${kind}${site || "Pasted text"}`;
+    const color = status === "failed" ? "#FF8A9F" : status === "working" ? "#5EE3F2" : data.source.category ? CATEGORY_COLORS[data.source.category] : SOURCE_RAMP[1];
     return (
-      <span className="ms-tag ms-tag-source" data-status={status} style={{ "--tag-color": status === "failed" ? "#FF8A9F" : status === "working" ? "#5EE3F2" : SOURCE_RAMP[1] } as CSSProperties}>
+      <span className="ms-tag ms-tag-source" data-status={status} data-category={data.source.category} style={{ "--tag-color": color } as CSSProperties}>
         {status === "working" && <i className="ms-tag-pulse" aria-hidden="true" />}
         {text}
       </span>
@@ -51,6 +56,15 @@ function DiscoveryTag({ id, data, discovery }: { id: string; data: IdeaNodeType[
         {CONCEPT_TYPE_LABELS[data.concept.type] ?? "Concept"}
         {count > 1 && <span className="ms-tag-count"> · {count} sources</span>}
         {count === 0 && <span className="ms-tag-count"> · no source</span>}
+      </span>
+    );
+  }
+  if (data.role === "claim" && data.claim) {
+    const count = data.claim.sourceIds.length;
+    return (
+      <span className="ms-tag" style={{ "--tag-color": CLAIM_RAMP[1] } as CSSProperties}>
+        Claim
+        <span className="ms-tag-count"> · {count === 0 ? "no source" : `${count} source${count === 1 ? "" : "s"}`}</span>
       </span>
     );
   }
@@ -77,7 +91,7 @@ function IdeaNodeComponent({ id, data }: NodeProps<IdeaNodeType>) {
   const conceptType = data.concept?.type;
   const sprite = useMemo(() => getRoleSprite({ kind, category, seed, role, concept: conceptType ? { type: conceptType } : undefined }), [kind, category, seed, role, conceptType]);
   const size = spriteSize(kind);
-  const ramp = role === "source" ? SOURCE_RAMP : role === "concept" ? CONCEPT_RAMPS[conceptRampKey(conceptType ?? "concept")] : kind === "core" ? CORE_RAMP : CATEGORY_RAMPS[category];
+  const ramp = role === "source" ? SOURCE_RAMP : role === "concept" ? CONCEPT_RAMPS[conceptRampKey(conceptType ?? "concept")] : role === "claim" ? CLAIM_RAMP : kind === "core" ? CORE_RAMP : CATEGORY_RAMPS[category];
   const style = labelStyle(kind);
   const moon = !role && kind === "planet" && seed % 3 === 1;
   const showTag = role || (discovery && kind !== "core") || kind === "planet";

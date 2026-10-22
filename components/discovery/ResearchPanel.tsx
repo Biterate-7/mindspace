@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ClipboardCopy, ExternalLink, FileText, Link2, LoaderCircle, PanelLeftClose, Play, Plus, RotateCcw, Search, Square, Trash2, TriangleAlert, X } from "lucide-react";
+import { Check, ClipboardCopy, ExternalLink, FileText, Link2, LoaderCircle, PanelLeftClose, Play, Plus, RotateCcw, Search, Sparkles, Square, Trash2, TriangleAlert, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { IdeaNode } from "@/types/graph";
@@ -8,12 +8,14 @@ import type { SearchResult } from "@/types/research";
 import { PixelIcon } from "@/components/ui/PixelIcon";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { sourceListMarkdown } from "@/lib/discovery/exportData";
-import { ERROR_LABELS, formatDate, STAGE_LABELS } from "@/lib/discovery/vocabulary";
+import { hasUsableAbstract, isImportable, resultKeys, sourceKeys } from "@/lib/discovery/sources";
+import { ERROR_LABELS, formatDate, PROVIDER_LABELS, STAGE_LABELS } from "@/lib/discovery/vocabulary";
 import { useMindspace } from "@/lib/store";
 import { requestRemoveSource, revealNode, startNewResearch } from "@/lib/store/actions";
 import type { ResearchTab } from "@/lib/store/types";
-import { MAX_SOURCES } from "@/lib/store/researchSlice";
+import { AUTO_IMPORT, MAX_SOURCES } from "@/lib/store/researchSlice";
 import { ProviderStatus } from "./ProviderStatus";
+import { ProviderOutcomes, SourceBadges } from "./SourceBadges";
 
 function useSources(): IdeaNode[] {
   return useMindspace(useShallow((s) => s.nodes.filter((n) => n.data.role === "source")));
@@ -34,8 +36,11 @@ function ResultRow({ result, selected, imported, onToggle }: { result: SearchRes
   const stage = useMindspace((s) => (imported ? s.jobs[imported.id]?.stage : undefined));
   const [open, setOpen] = useState(false);
   const status = imported ? (stage ? STAGE_LABELS[stage] : imported.data.source?.status === "ready" ? "Imported" : imported.data.source?.status === "failed" ? "Failed" : "Not processed") : null;
-  const disabled = Boolean(imported) || Boolean(result.unsupported);
+  const abstractOnly = Boolean(result.unsupported) && hasUsableAbstract(result);
+  const disabled = Boolean(imported) || (Boolean(result.unsupported) && !abstractOnly);
   const date = formatDate(result.publishedAt);
+  const byline = [result.authors?.length ? `${result.authors.slice(0, 3).join(", ")}${result.authors.length > 3 ? " et al." : ""}` : "", result.venue ?? ""].filter(Boolean).join(" · ");
+  const providers = (result.providers ?? [result.provider]).map((p) => PROVIDER_LABELS[p]);
   return (
     <li className={`border-b border-line/70 px-3 py-2.5 ${selected ? "bg-cyan/[0.06]" : ""}`}>
       <div className="flex items-start gap-2.5">
@@ -50,9 +55,12 @@ function ResultRow({ result, selected, imported, onToggle }: { result: SearchRes
             {result.title}
           </button>
           <p className="font-pixel mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[7px] uppercase tracking-[0.12em] text-ink-3">
-            <span className="text-ink-2">{result.domain}</span>
+            <span className="text-ink-2" title={result.domain}>
+              {/doi\.org$/.test(result.domain) && result.publisher ? result.publisher : result.domain}
+            </span>
+            <SourceBadges category={result.category} role={result.sourceRole} preprint={result.preprint} />
             {date && <span title="Date reported by the search provider">{date}</span>}
-            {result.unsupported && <span className="text-gold">{result.unsupported} · not importable</span>}
+            {result.unsupported && <span className="text-gold">{result.unsupported} · {abstractOnly ? "abstract only" : "not importable"}</span>}
             {status && (
               <span className={stage ? "text-cyan" : status === "Failed" ? "text-danger" : "text-[#7fe6b5]"}>
                 {stage && <LoaderCircle size={8} className="mr-1 inline animate-spin" />}
@@ -60,18 +68,33 @@ function ResultRow({ result, selected, imported, onToggle }: { result: SearchRes
               </span>
             )}
           </p>
-          {result.snippet && (
+          {byline && <p className="mt-0.5 truncate text-[11.5px] text-ink-3">{byline}</p>}
+          {(result.snippet || (!open && result.abstract)) && (
             <p className={`mt-1 text-[12px] leading-snug text-ink-2 ${open ? "" : "line-clamp-2"}`}>
-              <span className="sr-only">Search snippet: </span>
-              {result.snippet}
+              <span className="sr-only">{result.snippet ? "Search snippet: " : "Abstract: "}</span>
+              {result.snippet || result.abstract}
             </p>
           )}
+          {open && result.abstract && result.snippet && <p className="mt-1.5 text-[12px] leading-snug text-ink-2">{result.abstract}</p>}
           {open && (
-            <div className="mt-1.5 flex items-center gap-3">
-              <span className="px-caption">Snippet from search · not the article</span>
-              <a href={result.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11.5px] text-cyan hover:underline">
-                Open <ExternalLink size={11} />
-              </a>
+            <div className="mt-1.5 space-y-1.5">
+              {(result.signals?.length ?? 0) > 0 && (
+                <ul className="flex flex-wrap gap-1">
+                  {result.signals!.map((s) => (
+                    <li key={s} className="border border-line px-1.5 py-px text-[10.5px] text-ink-3">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="px-caption">
+                  {result.abstract ? "Abstract supplied by the index" : "Snippet from search"} · not the article · via {providers.join(", ")}
+                </span>
+                <a href={result.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11.5px] text-cyan hover:underline">
+                  Open <ExternalLink size={11} />
+                </a>
+              </div>
             </div>
           )}
         </div>
@@ -119,18 +142,26 @@ function SearchTab() {
   const toggleResult = useMindspace((s) => s.toggleResult);
   const setSelected = useMindspace((s) => s.setSelectedResults);
   const importResults = useMindspace((s) => s.importResults);
+  const importTopResults = useMindspace((s) => s.importTopResults);
   const sources = useSources();
   const search = research?.search;
   const [draft, setDraft] = useState<string | null>(null);
   const query = draft ?? search?.query ?? research?.question ?? "";
-  const scope = search?.scope ?? (config && !config.web && config.encyclopedia ? "encyclopedia" : "web");
-  const byKey = useMemo(() => new Map(sources.map((n) => [n.data.source?.key ?? "", n])), [sources]);
-  const importable = (search?.results ?? []).filter((r) => !byKey.has(r.key) && !r.unsupported);
+  // Every identity of every source (address, canonical address, DOI, arXiv id…) maps to its node.
+  const byKey = useMemo(() => new Map(sources.flatMap((n) => (n.data.source ? sourceKeys(n.data.source).map((k) => [k, n] as const) : []))), [sources]);
+  const keys = useMemo(() => new Set(byKey.keys()), [byKey]);
   const searching = searchState.status === "searching";
+  const live = searching && !searchState.more ? (searchState.live ?? []) : null;
+  const results = live ?? search?.results ?? [];
+  const importable = live ? [] : results.filter((r) => isImportable(r, keys));
+  const importedFor = (r: SearchResult) => resultKeys(r).map((k) => byKey.get(k)).find(Boolean);
+  const outcomes = searching || searchState.status === "error" ? (searchState.outcomes ?? []) : (search?.outcomes ?? []);
+  const room = MAX_SOURCES - sources.length;
+  const domains = new Set(results.map((r) => r.domain)).size;
 
-  const submit = (text = query, nextScope = scope) => {
+  const submit = (text = query) => {
     setDraft(null);
-    void runSearch(text, { scope: nextScope });
+    void runSearch(text);
   };
 
   return (
@@ -156,28 +187,13 @@ function SearchTab() {
             {searching && !searchState.more ? <LoaderCircle size={13} className="animate-spin" /> : "Search"}
           </button>
         </div>
-        {config?.web && config.encyclopedia && (
-          <div className="mt-2 flex items-center gap-1" role="radiogroup" aria-label="Search scope">
-            {(["web", "encyclopedia"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                role="radio"
-                aria-checked={scope === s}
-                onClick={() => submit(query, s)}
-                className={`font-pixel h-6 px-2 text-[7px] uppercase tracking-[0.12em] ${scope === s ? "bg-cyan/15 text-ink" : "text-ink-3 hover:text-ink-2"}`}
-              >
-                {s === "web" ? config.web?.label : config.encyclopedia?.label}
-              </button>
-            ))}
-          </div>
-        )}
         <div className="mt-2">
           <ProviderStatus />
         </div>
       </form>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {(searching || outcomes.length > 0) && !searchState.more && <ProviderOutcomes providers={searching ? searchState.providers : undefined} outcomes={outcomes} searching={searching} />}
         {searchState.status === "error" && (
           <div className="m-3 border border-[rgba(255,122,154,0.35)] bg-[rgba(255,122,154,0.07)] p-2.5 text-[12px] text-[#ffc2d1]" role="alert">
             <p className="flex items-start gap-2">
@@ -187,22 +203,24 @@ function SearchTab() {
             <p className="mt-1.5 text-ink-3">You can still add sources by URL in the Sources tab.</p>
           </div>
         )}
-        {searching && !searchState.more && (
+        {searching && !searchState.more && results.length === 0 && (
           <p className="flex items-center gap-2 px-3 py-6 text-[12.5px] text-ink-2" role="status">
-            <LoaderCircle size={14} className="animate-spin text-cyan" /> Searching {scope === "web" ? config?.web?.label ?? "the web" : config?.encyclopedia?.label ?? "the encyclopedia"}…
+            <LoaderCircle size={14} className="animate-spin text-cyan" /> Searching {config?.providers.length ?? "several"} sources in parallel…
           </p>
         )}
         {!searching && !search && searchState.status !== "error" && (
           <div className="px-4 py-8 text-center">
             <PixelIcon name="telescope" scale={3} className="mx-auto text-cyan/70" />
-            <p className="mt-3 text-[13px] text-ink-2">Search for sources about your question, then pick the ones worth reading.</p>
+            <p className="mt-3 text-[13px] text-ink-2">Search research indexes, news, technical and public sources about your question, then pick the ones worth reading.</p>
           </div>
         )}
-        {search && !(searching && !searchState.more) && (
+        {(search || results.length > 0) && !(searching && !searchState.more && results.length === 0) && (
           <>
             <div className="flex items-center justify-between gap-2 px-3 pb-1.5 pt-2.5">
-              <p className="px-caption min-w-0 truncate">
-                {search.results.length} result{search.results.length === 1 ? "" : "s"} · {search.provider === "wikipedia" ? "Wikipedia" : search.provider === "brave" ? "Brave Search" : "Tavily"}
+              <p className="px-caption min-w-0 truncate" role={live ? "status" : undefined}>
+                {live && <LoaderCircle size={9} className="mr-1 inline animate-spin text-cyan" aria-hidden="true" />}
+                {results.length} result{results.length === 1 ? "" : "s"} · {domains} site{domains === 1 ? "" : "s"}
+                {live ? " · more arriving" : search?.facets?.length ? ` · ${search.facets.join(", ")}` : ""}
               </p>
               {importable.length > 0 && (
                 <button type="button" className="shrink-0 text-[11.5px] text-ink-3 hover:text-ink" onClick={() => setSelected(selected.length === importable.length ? [] : importable.map((r) => r.id))}>
@@ -210,16 +228,30 @@ function SearchTab() {
                 </button>
               )}
             </div>
-            {search.results.length === 0 ? (
-              <p className="px-3 py-4 text-[12.5px] text-ink-3">No results for “{search.query}”. Try different words.</p>
+            {importable.length > 0 && room > 0 && selected.length === 0 && (
+              <div className="px-3 pb-2">
+                <button type="button" className="px-btn h-8 w-full text-[12.5px]" onClick={() => importTopResults(AUTO_IMPORT)}>
+                  <Sparkles size={13} /> Import the top {Math.min(AUTO_IMPORT, room, importable.length)} from different sites
+                </button>
+              </div>
+            )}
+            {!live && search?.queries && search.queries.length > 0 && (
+              <p className="px-3 pb-1.5 text-[11px] leading-snug text-ink-3" title="Queries Mindspace generated from your question">
+                Searched for: {search.queries.slice(0, 4).map((q) => `“${q}”`).join(" · ")}
+              </p>
+            )}
+            {results.length === 0 ? (
+              <p className="px-3 py-4 text-[12.5px] text-ink-3">
+                No relevant results for “{search?.query}”{outcomes.some((o) => o.status === "failed" || o.status === "timeout" || o.status === "rate_limited") ? " — some providers failed (above), so this may be incomplete" : ""}. Try different words.
+              </p>
             ) : (
               <ul>
-                {search.results.map((r) => (
-                  <ResultRow key={r.id} result={r} selected={selected.includes(r.id)} imported={byKey.get(r.key)} onToggle={() => toggleResult(r.id)} />
+                {results.map((r) => (
+                  <ResultRow key={r.id} result={r} selected={selected.includes(r.id)} imported={importedFor(r)} onToggle={() => toggleResult(r.id)} />
                 ))}
               </ul>
             )}
-            {search.nextOffset !== null && (
+            {!live && search && search.nextOffset !== null && (
               <div className="p-3">
                 <button type="button" className="px-btn h-8 w-full text-[12.5px]" onClick={() => void runSearch(undefined, { more: true })} disabled={searching}>
                   {searching && searchState.more ? <LoaderCircle size={13} className="animate-spin" /> : <Plus size={13} />} More results
@@ -268,7 +300,9 @@ function SourceRow({ node }: { node: IdeaNode }) {
           <span className="block truncate text-[13px] text-ink group-hover:text-cyan">{node.data.label}</span>
           <span className="font-pixel mt-0.5 flex flex-wrap gap-x-2 text-[7px] uppercase tracking-[0.12em] text-ink-3">
             <span>{source.domain || (source.textOrigin === "pasted" ? "Pasted text" : "")}</span>
+            <SourceBadges category={source.category} preprint={source.preprint} />
             <span className={tone}>{status}</span>
+            {source.textOrigin === "abstract" && source.status === "ready" && !stage && <span className="text-gold">Abstract only</span>}
           </span>
           {source.status === "failed" && source.error && !stage && <span className="mt-1 block text-[11.5px] leading-snug text-ink-3">{source.error.message}</span>}
         </button>

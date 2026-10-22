@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { plainSnippet, rankResults, type RawResult } from "@/lib/discovery/rank";
+import { planResearch } from "@/lib/discovery/plan";
+import { plainSnippet, rankFederated, type Candidate, type RawResult } from "@/lib/discovery/rank";
 import { braveProvider, providersFromEnv, publicConfig, tavilyProvider, wikipediaProvider } from "@/lib/discovery/server/search";
 import { domainOf, parseHttpUrl, splitUrlInput, unsupportedFormat, urlKey } from "@/lib/discovery/url";
 
@@ -30,21 +31,25 @@ describe("URL normalisation", () => {
 });
 
 describe("search result ranking", () => {
+  const question = "Why did the Versailles treaty reparations matter?";
+  const plan = planResearch(question);
   const raw: RawResult[] = [
     { title: "Treaty of <strong>Versailles</strong>", url: "https://en.wikipedia.org/wiki/Treaty_of_Versailles", snippet: "The treaty &amp; its terms…" },
     { title: "Treaty of Versailles", url: "https://en.wikipedia.org/wiki/Treaty_of_Versailles?utm_source=feed", snippet: "duplicate" },
-    { title: "Same title, other URL", url: "https://history.example/a" },
-    { title: "Same title, other URL", url: "https://history.example/b" },
-    { title: "Reparations and the Weimar economy", url: "https://econ.example/reparations", snippet: "How reparations shaped Weimar Germany", publishedAt: "2021-02-03" },
+    { title: "Versailles treaty reparations explained", url: "https://history.example/a" },
+    { title: "Versailles treaty reparations explained", url: "https://history.example/b" },
+    { title: "Reparations and the Weimar economy", url: "https://econ.example/reparations", snippet: "How Versailles reparations shaped Weimar Germany", publishedAt: "2021-02-03" },
     { title: "Unrelated cooking blog", url: "https://food.example/soup" },
-    { title: "A PDF report", url: "https://archive.example/report.pdf" },
+    { title: "Versailles treaty reparations report", url: "https://archive.example/report.pdf" },
     { title: "Bad scheme", url: "javascript:alert(1)" },
     { title: "", url: "https://empty.example/" },
-    { title: "Bad date", url: "https://dates.example/x", publishedAt: "yesterday-ish" },
+    { title: "Versailles reparations timeline", url: "https://dates.example/x", publishedAt: "yesterday-ish" },
   ];
-  const results = rankResults(raw, "Why did the Versailles treaty reparations matter?", "brave");
+  const candidates = (items: RawResult[]): Candidate[] => items.map((result, rank) => ({ result, provider: "brave", rank, query: question }));
+  const rank = (items: RawResult[], extra: Partial<Parameters<typeof rankFederated>[2]> = {}) => rankFederated(candidates(items), question, { facets: plan.facets, recency: false, terms: plan.terms, ...extra });
+  const results = rank(raw);
 
-  it("deduplicates by normalised URL and by same-domain title, and drops unusable entries", () => {
+  it("deduplicates by normalised URL and by same-site title, and drops unusable entries", () => {
     expect(results.filter((r) => r.domain === "en.wikipedia.org")).toHaveLength(1);
     expect(results.filter((r) => r.domain === "history.example")).toHaveLength(1);
     expect(results.some((r) => r.url.startsWith("javascript"))).toBe(false);
@@ -57,18 +62,17 @@ describe("search result ranking", () => {
     expect(wiki?.snippet).toBe("The treaty & its terms…");
     expect(results.find((r) => r.domain === "econ.example")?.publishedAt).toBe("2021-02-03");
     expect(results.find((r) => r.domain === "dates.example")?.publishedAt).toBeUndefined();
-    expect(results.find((r) => r.domain === "food.example")?.publishedAt).toBeUndefined();
+    expect(results.find((r) => r.domain === "history.example")?.publishedAt).toBeUndefined();
   });
 
-  it("ranks relevant results first and unsupported formats last", () => {
-    const order = results.map((r) => r.domain);
-    expect(order.indexOf("econ.example")).toBeLessThan(order.indexOf("food.example"));
+  it("drops loosely related results and ranks unreadable formats last", () => {
+    expect(results.some((r) => r.domain === "food.example")).toBe(false);
     expect(results[results.length - 1].unsupported).toBe("PDF");
     expect(results.map((r) => r.rank)).toEqual(results.map((_, i) => i));
   });
 
   it("excludes results already shown when loading more", () => {
-    const more = rankResults(raw, "versailles", "brave", 10, new Set([urlKey("https://en.wikipedia.org/wiki/Treaty_of_Versailles")]));
+    const more = rank(raw, { startRank: 10, exclude: new Set([urlKey("https://en.wikipedia.org/wiki/Treaty_of_Versailles")]) });
     expect(more.some((r) => r.domain === "en.wikipedia.org")).toBe(false);
     expect(more[0].rank).toBe(10);
   });
@@ -139,8 +143,21 @@ describe("search providers", () => {
     expect(providersFromEnv({ BRAVE_SEARCH_API_KEY: "b" } as unknown as NodeJS.ProcessEnv).web?.id).toBe("brave");
     expect(providersFromEnv({ BRAVE_SEARCH_API_KEY: "b", TAVILY_API_KEY: "t", DISCOVERY_SEARCH_PROVIDER: "tavily" } as unknown as NodeJS.ProcessEnv).web?.id).toBe("tavily");
     expect(providersFromEnv({ DISCOVERY_DISABLE_WIKIPEDIA: "1" } as unknown as NodeJS.ProcessEnv).encyclopedia).toBeNull();
-    const config = publicConfig({ BRAVE_SEARCH_API_KEY: "secret-brave-key", ANTHROPIC_API_KEY: "secret-anthropic" } as unknown as NodeJS.ProcessEnv);
+    const config = publicConfig({ BRAVE_SEARCH_API_KEY: "secret-brave-key", GITHUB_TOKEN: "secret-gh", OPENALEX_API_KEY: "secret-oa", ANTHROPIC_API_KEY: "secret-anthropic" } as unknown as NodeJS.ProcessEnv);
     expect(JSON.stringify(config)).not.toContain("secret");
     expect(config.web).toEqual({ id: "brave", label: "Brave Search" });
+  });
+
+  it("searches many independent keyless indexes without any key, not just Wikipedia", () => {
+    const { all } = providersFromEnv({} as NodeJS.ProcessEnv);
+    const ids = all.map((p) => p.id);
+    expect(ids).toEqual(expect.arrayContaining(["openalex", "arxiv", "europepmc", "gdelt", "hackernews", "github", "stackexchange", "federalregister", "worldbank", "wikipedia"]));
+    expect(all.every((p) => p.keyless)).toBe(true);
+    // Wikipedia is attributed last, after every other kind of source.
+    expect(ids[ids.length - 1]).toBe("wikipedia");
+    const keyed = providersFromEnv({ TAVILY_API_KEY: "t", DISCOVERY_DISABLE_PROVIDERS: "gdelt, github" } as unknown as NodeJS.ProcessEnv).all.map((p) => p.id);
+    expect(keyed[0]).toBe("tavily");
+    expect(keyed).not.toContain("gdelt");
+    expect(keyed).not.toContain("github");
   });
 });

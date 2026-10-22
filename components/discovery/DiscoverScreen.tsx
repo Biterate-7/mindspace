@@ -8,6 +8,7 @@ import { HeroGalaxy } from "@/components/create/HeroGalaxy";
 import { LogoMark, PixelIcon } from "@/components/ui/PixelIcon";
 import { EXAMPLE_QUESTIONS } from "@/lib/discovery/vocabulary";
 import { useMindspace } from "@/lib/store";
+import { AUTO_IMPORT } from "@/lib/store/researchSlice";
 import { useMediaQuery } from "@/lib/utils/motion";
 import { ProviderStatus } from "./ProviderStatus";
 
@@ -31,6 +32,7 @@ export function DiscoverScreen({ overlay = false }: { overlay?: boolean }) {
   const [question, setQuestion] = useState("");
   const [urls, setUrls] = useState("");
   const [showUrls, setShowUrls] = useState(false);
+  const [autoBuild, setAutoBuild] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recent = maps.filter((m) => m.workspace === "discovery").slice(0, 4);
 
@@ -53,7 +55,7 @@ export function DiscoverScreen({ overlay = false }: { overlay?: boolean }) {
       inputRef.current?.focus();
       return;
     }
-    startResearch(question, showUrls ? urls : "");
+    startResearch(question, showUrls ? urls : "", { autoImport: autoBuild ? AUTO_IMPORT : 0 });
   };
 
   return (
@@ -158,7 +160,7 @@ export function DiscoverScreen({ overlay = false }: { overlay?: boolean }) {
                         value={urls}
                         onChange={(e) => setUrls(e.target.value)}
                         rows={3}
-                        placeholder={"https://en.wikipedia.org/wiki/Treaty_of_Versailles\nhttps://…"}
+                        placeholder={"https://www.britannica.com/event/Treaty-of-Versailles-1919\nhttps://…"}
                         className="px-input block resize-y px-3 py-2 font-mono text-[12px] leading-relaxed"
                         spellCheck={false}
                       />
@@ -169,6 +171,13 @@ export function DiscoverScreen({ overlay = false }: { overlay?: boolean }) {
                     </button>
                   )}
                 </div>
+                <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[12px] text-ink-2">
+                  <input type="checkbox" checked={autoBuild} onChange={(e) => setAutoBuild(e.target.checked)} className="mt-0.5 accent-[#5EE3F2]" />
+                  <span>
+                    Build the galaxy automatically from the top {AUTO_IMPORT} sources
+                    <span className="block text-[11px] text-ink-3">Picked from different sites; you can review, remove or add more afterwards.</span>
+                  </span>
+                </label>
               </div>
               <div className="flex flex-col gap-3 border-t border-line px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 flex-1">

@@ -3,7 +3,7 @@
 import { ArrowLeftRight, PanelRightClose, Trash2, Unlink } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { RELATIONS } from "@/types/graph";
-import { ConceptInspector, ResearchEdgeInspector, ResearchOverview, SourceInspector } from "@/components/discovery/Inspectors";
+import { ClaimInspector, ConceptInspector, ResearchEdgeInspector, ResearchOverview, SourceInspector } from "@/components/discovery/Inspectors";
 import { PixelIcon } from "@/components/ui/PixelIcon";
 import { RELATION_HINTS } from "@/lib/discovery/vocabulary";
 import { RELATION_LABELS } from "@/lib/generation/relations";
@@ -162,6 +162,8 @@ export function Inspector({ onClose, showClose = true }: { onClose: () => void; 
             <SourceInspector key={selectedNodeId} id={selectedNodeId} data={data} />
           ) : data.role === "concept" && data.concept ? (
             <ConceptInspector key={selectedNodeId} id={selectedNodeId} data={data} />
+          ) : data.role === "claim" && data.claim ? (
+            <ClaimInspector key={selectedNodeId} id={selectedNodeId} data={data} />
           ) : (
             <NodeInspector key={selectedNodeId} id={selectedNodeId} data={data} />
           )

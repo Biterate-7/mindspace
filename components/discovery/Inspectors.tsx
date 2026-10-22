@@ -9,7 +9,7 @@ import { PixelSprite } from "@/components/graph/PixelSprite";
 import { ConnectPicker } from "@/components/workspace/ConnectPicker";
 import { contentStore } from "@/lib/discovery/contentStore";
 import { hasTension, isUnreviewed } from "@/lib/discovery/merge";
-import { ERROR_LABELS, formatDate, RELATION_HINTS, REVIEW_HINTS, REVIEW_LABELS, STAGE_LABELS } from "@/lib/discovery/vocabulary";
+import { ERROR_LABELS, formatDate, PROVIDER_LABELS, RELATION_HINTS, REVIEW_HINTS, REVIEW_LABELS, STAGE_LABELS } from "@/lib/discovery/vocabulary";
 import { RELATION_LABELS } from "@/lib/generation/relations";
 import { labelKey } from "@/lib/generation/text";
 import { CONCEPT_TYPE_LABELS, RELATION_COLORS, ROLE_COLORS } from "@/lib/space/palette";
@@ -17,6 +17,7 @@ import { getRoleSprite } from "@/lib/space/sprites";
 import { useMindspace } from "@/lib/store";
 import { focusOn, requestDeleteNodes, requestRemoveSource, revealNode, startConnect } from "@/lib/store/actions";
 import { PASTE_FALLBACK } from "@/lib/store/researchSlice";
+import { SourceBadges } from "./SourceBadges";
 
 function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
@@ -138,10 +139,12 @@ export function SourceInspector({ id, data }: { id: string; data: IdeaData }) {
   const processSource = useMindspace((s) => s.processSource);
   const cancelSource = useMindspace((s) => s.cancelSource);
   const concepts = useMindspace(useShallow((s) => s.nodes.filter((n) => n.data.concept?.refs.some((r) => r.sourceId === id))));
+  const claims = useMindspace(useShallow((s) => s.nodes.filter((n) => n.data.claim?.sourceIds.includes(id))));
   const [pasting, setPasting] = useState(false);
   const published = formatDate(source.publishedAt);
   const retrieved = formatDate(source.retrievedAt);
   const sprite = useMemo(() => getRoleSprite(data), [data]);
+  const authors = source.authors?.length ? `${source.authors.slice(0, 4).join(", ")}${source.authors.length > 4 ? ` and ${source.authors.length - 4} more` : ""}` : source.byline;
 
   return (
     <div className="pb-4">
@@ -153,13 +156,24 @@ export function SourceInspector({ id, data }: { id: string; data: IdeaData }) {
           <div className="min-w-0">
             <p className="px-caption mb-1">Source · {source.siteName ?? source.domain ?? "pasted text"}</p>
             <h2 className="text-[16px] font-semibold leading-snug tracking-[-0.01em] text-ink">{data.label}</h2>
-            {source.byline && <p className="mt-0.5 text-[12px] text-ink-3">{source.byline}</p>}
+            {authors && <p className="mt-0.5 text-[12px] text-ink-3">{authors}</p>}
+            {source.venue && <p className="mt-0.5 text-[12px] italic text-ink-3">{source.venue}</p>}
+            {(source.category || source.sourceRole) && (
+              <p className="font-pixel mt-1.5 flex flex-wrap gap-x-2 text-[7px] uppercase tracking-[0.12em]">
+                <SourceBadges category={source.category} role={source.sourceRole} preprint={source.preprint} />
+              </p>
+            )}
           </div>
         </div>
         {source.url && (
           <a href={source.canonicalUrl ?? source.url} target="_blank" rel="noopener noreferrer" className="px-btn mt-3 h-8 w-full justify-start text-[12.5px]">
             <ExternalLink size={13} />
             <span className="min-w-0 flex-1 truncate text-left">Open original · {source.domain}</span>
+          </a>
+        )}
+        {source.doi && (
+          <a href={`https://doi.org/${source.doi}`} target="_blank" rel="noopener noreferrer" className="mt-1.5 block truncate text-[11.5px] text-ink-3 hover:text-cyan hover:underline">
+            DOI {source.doi}
           </a>
         )}
         <dl className="mt-3 grid grid-cols-2 gap-px border border-line bg-line text-[12px]">
@@ -220,16 +234,48 @@ export function SourceInspector({ id, data }: { id: string; data: IdeaData }) {
               {source.truncated && <span className="text-ink-3">· long article, first part analysed</span>}
             </p>
             {source.paywallHint && <p className="mt-1 text-[11.5px] text-gold">The page signals paywalled content — the extracted text may be partial.</p>}
+            {source.textOrigin === "abstract" && (
+              <p className="mt-1 text-[11.5px] leading-snug text-gold">
+                Only the abstract{source.abstractFrom ? ` supplied by ${PROVIDER_LABELS[source.abstractFrom]}` : ""} was analysed — the full page was not read{source.accessError ? ` (${source.accessError.message.replace(/\.$/, "")})` : ""}.
+                {!pasting && PASTE_FALLBACK.has(source.accessError?.code ?? "network") && (
+                  <button type="button" className="ml-1 underline underline-offset-2 hover:text-ink" onClick={() => setPasting(true)}>
+                    Paste the full text
+                  </button>
+                )}
+              </p>
+            )}
             {source.analysis === "local" && <ApproximateNotice />}
           </div>
         )}
         {pasting && <PasteForSource sourceId={id} onDone={() => setPasting(false)} />}
       </Section>
 
+      {(source.signals?.length || source.providers?.length || source.citedBy !== undefined) && (
+        <Section title="Why this source">
+          {(source.signals?.length ?? 0) > 0 && (
+            <ul className="flex flex-wrap gap-1">
+              {source.signals!.map((s) => (
+                <li key={s} className="border border-line px-1.5 py-px text-[11px] text-ink-2">
+                  {s}
+                </li>
+              ))}
+            </ul>
+          )}
+          {source.providers?.length ? <p className="mt-2 text-[11.5px] text-ink-3">Found by {source.providers.map((p) => PROVIDER_LABELS[p]).join(", ")}{source.query ? ` for “${source.query}”` : ""}.</p> : null}
+          <p className="mt-1 text-[11px] text-ink-3">Labels are heuristics from the address and the index that found it — a starting point for judging the source, not a verdict.</p>
+        </Section>
+      )}
+
       {source.summary && (
-        <Section title={source.summaryKind === "model" ? "Summary · written by a model" : "Summary · quoted sentences"}>
+        <Section title={source.summaryKind === "model" ? "Summary · written by a model" : source.textOrigin === "abstract" ? "Summary · quoted from the abstract" : "Summary · quoted sentences"}>
           {source.summaryKind === "model" ? <p className="text-[13px] leading-relaxed text-ink-2">{source.summary}</p> : <Quote>{source.summary}</Quote>}
-          {source.summaryKind !== "model" && <p className="mt-1.5 text-[11px] text-ink-3">An extractive summary: these sentences appear verbatim in the article.</p>}
+          {source.summaryKind !== "model" && <p className="mt-1.5 text-[11px] text-ink-3">An extractive summary: these sentences appear verbatim in the {source.textOrigin === "abstract" ? "abstract" : "article"}.</p>}
+        </Section>
+      )}
+
+      {source.abstract && source.textOrigin !== "abstract" && (
+        <Section title={`Abstract${source.abstractFrom ? ` · from ${PROVIDER_LABELS[source.abstractFrom]}` : ""}`}>
+          <p className="line-clamp-[12] text-[12.5px] leading-relaxed text-ink-2">{source.abstract}</p>
         </Section>
       )}
 
@@ -271,6 +317,21 @@ export function SourceInspector({ id, data }: { id: string; data: IdeaData }) {
         )}
       </Section>
 
+      {claims.length > 0 && (
+        <Section title={`Claims on the map · ${claims.length}`}>
+          <ul className="flex flex-col gap-1.5">
+            {claims.map((n) => (
+              <li key={n.id}>
+                <button type="button" className="flex w-full items-start gap-2 text-left text-[12.5px] leading-snug text-ink-2 hover:text-ink" onClick={() => revealNode(n.id)}>
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0" style={{ background: ROLE_COLORS.claim }} aria-hidden="true" />
+                  <span>{n.data.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
       <Section title="Your notes">
         <NotesField id={id} notes={data.notes} placeholder="How reliable is this source? What is it arguing?" />
       </Section>
@@ -291,6 +352,95 @@ export function SourceInspector({ id, data }: { id: string; data: IdeaData }) {
             <Crosshair size={13} /> Focus
           </button>
           <button type="button" className="px-btn h-8 justify-start text-[12.5px] hover:!border-[rgba(255,122,154,0.4)] hover:!text-danger" onClick={() => requestRemoveSource(id)}>
+            <Trash2 size={13} /> Remove
+          </button>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+// --- Claim --------------------------------------------------------------------------
+
+export function ClaimInspector({ id, data }: { id: string; data: IdeaData }) {
+  const claim = data.claim!;
+  const updateClaim = useMindspace((s) => s.updateClaim);
+  const sources = useMindspace(useShallow((s) => s.nodes.filter((n) => n.data.role === "source" && claim.sourceIds.includes(n.id))));
+  const about = useMindspace(useShallow((s) => s.nodes.filter((n) => n.data.role === "concept" && s.edges.some((e) => e.source === id && e.target === n.id && e.data?.relation === "evidence"))));
+  const sprite = useMemo(() => getRoleSprite(data), [data]);
+
+  return (
+    <div className="pb-4">
+      <div className="px-4 pb-3.5 pt-4">
+        <div className="flex items-start gap-3">
+          <span className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center">
+            <PixelSprite sprite={sprite} size={30} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="px-caption mb-1.5">
+              Claim · quoted from {sources.length} source{sources.length === 1 ? "" : "s"}
+            </p>
+            <Quote>{claim.text}</Quote>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <p className="text-[11px] leading-snug text-ink-3">A sentence stating an argument, picked by keyword cues — verbatim, not paraphrased.</p>
+          <button
+            type="button"
+            onClick={() => updateClaim(id, { review: claim.review === "accepted" ? "unreviewed" : "accepted" })}
+            aria-pressed={claim.review === "accepted"}
+            className={`px-btn h-7 shrink-0 text-[12px] ${claim.review === "accepted" ? "!border-[rgba(127,230,181,0.4)] text-[#7fe6b5]" : ""}`}
+          >
+            <Check size={12} /> {claim.review === "accepted" ? "Reviewed" : "Mark reviewed"}
+          </button>
+        </div>
+        {claim.sourceIds.length === 0 && <p className="mt-2 border border-[rgba(245,196,81,0.3)] bg-[rgba(245,196,81,0.06)] px-2.5 py-1.5 text-[11.5px] text-ink-2">Its source was removed. It stays because you reviewed it or added notes or links.</p>}
+      </div>
+
+      <Section title={`Where it comes from · ${sources.length}`}>
+        <ul className="flex flex-col gap-1.5">
+          {sources.map((n) => (
+            <li key={n.id} className="flex items-center gap-2">
+              <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left text-[12.5px] text-ink-2 hover:text-ink" onClick={() => revealNode(n.id)}>
+                <span className="h-1.5 w-1.5 shrink-0" style={{ background: ROLE_COLORS.source }} aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">{n.data.label}</span>
+                <span className="font-pixel shrink-0 text-[7px] uppercase tracking-[0.1em] text-ink-3">{n.data.source?.domain}</span>
+              </button>
+              {n.data.source?.url && (
+                <a href={n.data.source.canonicalUrl ?? n.data.source.url} target="_blank" rel="noopener noreferrer" className="px-icon-btn h-7 w-7 shrink-0" aria-label={`Open ${n.data.label} in a new tab`} title="Open original">
+                  <ExternalLink size={12} />
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      {about.length > 0 && (
+        <Section title={`Evidence about · ${about.length}`}>
+          <ul className="flex flex-col">
+            {about.map((n) => (
+              <li key={n.id}>
+                <button type="button" className="flex w-full items-center gap-2 py-1 text-left text-[12.5px] text-ink-2 hover:text-ink" onClick={() => revealNode(n.id)}>
+                  <span className="h-1.5 w-1.5 shrink-0" style={{ background: ROLE_COLORS.concept }} aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{n.data.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      <Section title="Your notes">
+        <NotesField id={id} notes={data.notes} placeholder="Does this hold up? What would confirm or contradict it?" />
+      </Section>
+
+      <Section title="Actions">
+        <div className="grid grid-cols-2 gap-1.5">
+          <button type="button" className="px-btn h-8 justify-start text-[12.5px]" onClick={() => focusOn(id)}>
+            <Crosshair size={13} /> Focus
+          </button>
+          <button type="button" className="px-btn h-8 justify-start text-[12.5px] hover:!text-danger" onClick={() => requestDeleteNodes([id])}>
             <Trash2 size={13} /> Remove
           </button>
         </div>
@@ -636,6 +786,8 @@ export function ResearchOverview() {
       ideas: s.nodes.filter((n) => !n.data.role).length,
       sources: s.nodes.filter((n) => n.data.role === "source").length,
       concepts: s.nodes.filter((n) => n.data.role === "concept").length,
+      claims: s.nodes.filter((n) => n.data.role === "claim").length,
+      domains: new Set(s.nodes.flatMap((n) => (n.data.role === "source" && n.data.source?.domain ? [n.data.source.domain] : []))).size,
       shared: s.nodes.filter((n) => (n.data.concept?.refs.length ?? 0) > 1).length,
       unreviewed: s.edges.filter(isUnreviewed).length,
     })),
@@ -659,7 +811,13 @@ export function ResearchOverview() {
           </button>
         ))}
       </dl>
-      {counts.shared > 0 && <p className="mt-2 text-[12px] text-ink-2">{counts.shared} concept{counts.shared === 1 ? " appears" : "s appear"} in more than one source.</p>}
+      {counts.sources > 0 && (
+        <p className="mt-2 text-[12px] text-ink-2">
+          {counts.sources} source{counts.sources === 1 ? "" : "s"} from {counts.domains} site{counts.domains === 1 ? "" : "s"}
+          {counts.claims > 0 ? ` · ${counts.claims} quoted claim${counts.claims === 1 ? "" : "s"}` : ""}.
+        </p>
+      )}
+      {counts.shared > 0 && <p className="mt-1 text-[12px] text-ink-2">{counts.shared} concept{counts.shared === 1 ? " appears" : "s appear"} in more than one source.</p>}
       <div className="mt-5 space-y-2 text-[12px] text-ink-2">
         <p className="px-caption">Legend</p>
         <p className="flex items-center gap-2">
@@ -669,10 +827,16 @@ export function ResearchOverview() {
           <span className="h-2 w-2" style={{ background: ROLE_COLORS.concept }} /> Concepts found in sources
         </p>
         <p className="flex items-center gap-2">
-          <span className="h-2 w-2" style={{ background: ROLE_COLORS.source }} /> Sources (articles, sites)
+          <span className="h-2 w-2" style={{ background: ROLE_COLORS.source }} /> Sources (papers, articles, docs, sites)
         </p>
         <p className="flex items-center gap-2">
-          <span className="w-4 border-t border-dotted border-[#6FA3C7]" /> Attribution · concept → source
+          <span className="h-2 w-2" style={{ background: ROLE_COLORS.claim }} /> Claims quoted from sources
+        </p>
+        <p className="flex items-center gap-2">
+          <span className="w-4 border-t border-dotted border-[#6FA3C7]" /> Attribution · concept or claim → source
+        </p>
+        <p className="flex items-center gap-2">
+          <span className="w-4 border-t border-dotted border-[#E8B65A]" /> Evidence · claim → concept
         </p>
         <p className="flex items-center gap-2">
           <span className="w-4 border-t border-dashed border-[#7C8CFF]" /> Suggested link, not yet reviewed

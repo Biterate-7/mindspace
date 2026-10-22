@@ -181,7 +181,7 @@ export function GraphCanvas() {
             ariaLabel="Minimap"
             nodeComponent={MiniNode}
             nodeColor={(node) =>
-              node.data.role === "source" ? ROLE_COLORS.source : node.data.role === "concept" ? ROLE_COLORS.concept : node.data.kind === "core" ? "#FFFFFF" : categoryColor(node.data.category)
+              node.data.role ? ROLE_COLORS[node.data.role] : node.data.kind === "core" ? "#FFFFFF" : categoryColor(node.data.category)
             }
             maskColor="rgba(3, 4, 10, 0.72)"
             style={{ width: 188, height: 132, bottom: 64, right: 16 }}

@@ -1,6 +1,6 @@
 import type { EdgeChange, NodeChange, Viewport } from "@xyflow/react";
 import type { IdeaData, IdeaEdge, IdeaNode, InputMode, LinkData, MapMeta, MindMap, Preferences, Relation } from "@/types/graph";
-import type { ConceptInfo, DiscoveryConfig, EdgeReview, IngestStage, ResearchMeta, SearchScope } from "@/types/research";
+import type { ClaimInfo, ConceptInfo, DiscoveryConfig, EdgeReview, IngestStage, ProviderInfo, ProviderOutcome, ResearchMeta, SearchResult } from "@/types/research";
 import type { Emphasis } from "@/lib/graph/emphasis";
 import type { History } from "@/lib/graph/history";
 
@@ -128,7 +128,11 @@ export interface ResearchSlice {
   mode: AppMode;
   discoverOpen: boolean;
   discoveryConfig: { status: "idle" | "loading" | "ready" | "error"; value: DiscoveryConfig | null; error?: string };
-  searchState: { status: "idle" | "searching" | "error"; more: boolean; error?: string; code?: string };
+  /**
+   * Search progress (memory only). While searching, `providers` lists who is being asked,
+   * `outcomes` who has answered, and `live` the ranked results so far.
+   */
+  searchState: { status: "idle" | "searching" | "error"; more: boolean; error?: string; code?: string; providers?: ProviderInfo[]; outcomes?: ProviderOutcome[]; live?: SearchResult[] };
   /** In-memory progress of imports in this tab. Never persisted: a refresh leaves sources "pending". */
   jobs: Record<string, Job>;
   researchFilter: ResearchFilter;
@@ -140,11 +144,14 @@ export interface ResearchSlice {
   closeDiscover: () => void;
   switchMode: (mode: AppMode) => void;
   loadDiscoveryConfig: (force?: boolean) => void;
-  startResearch: (question: string, urlText?: string) => boolean;
-  runSearch: (query?: string, options?: { more?: boolean; scope?: SearchScope }) => Promise<void>;
+  /** Starts (or reopens and enriches) a research workspace; `autoImport` imports that many top sources once search finishes. */
+  startResearch: (question: string, urlText?: string, options?: { autoImport?: number }) => boolean;
+  runSearch: (query?: string, options?: { more?: boolean; autoImport?: number }) => Promise<void>;
   toggleResult: (id: string) => void;
   setSelectedResults: (ids: string[]) => void;
   importResults: (ids: string[]) => void;
+  /** Imports the best-ranked results not yet in the workspace (one per domain). Returns how many. */
+  importTopResults: (count: number) => number;
   addSourceUrls: (text: string) => { added: number; invalid: string[]; duplicates: number };
   addManualSource: (input: { title: string; url?: string; text: string }) => boolean;
   setManualText: (sourceId: string, text: string) => Promise<void>;
@@ -161,6 +168,7 @@ export interface ResearchSlice {
   setEdgeReview: (edgeId: string, review: EdgeReview) => void;
   updateEdgeData: (edgeId: string, patch: Partial<LinkData>) => void;
   updateConcept: (nodeId: string, patch: Partial<ConceptInfo>) => void;
+  updateClaim: (nodeId: string, patch: Partial<ClaimInfo>) => void;
   connectResearch: (source: string, target: string, relation: Relation, extra?: Omit<LinkData, "relation">) => boolean;
 }
 

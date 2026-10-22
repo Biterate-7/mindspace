@@ -1,4 +1,5 @@
 import type { Category, Relation } from "@/types/graph";
+import type { SourceCategory } from "@/types/research";
 
 /**
  * Limited pixel-art palettes. Each ramp runs highlight -> deep shadow so sprites
@@ -47,6 +48,24 @@ export const CONCEPT_RAMPS: Record<"idea" | "named", Ramp> = {
 
 export const SOURCE_RAMP: Ramp = ["#F4F6FF", "#C8CFEA", "#8E98C4", "#58618F", "#2A2F4F"];
 
+/** Tag colours for kinds of publisher, kept in the steel/cyan family of sources with a few warm accents. */
+export const CATEGORY_COLORS: Record<SourceCategory, string> = {
+  academic: "#9DF3FB",
+  news: "#FFB7A6",
+  reference: "#C8CFEA",
+  government: "#A9C1FF",
+  documentation: "#7FE6B5",
+  code: "#B39CFF",
+  discussion: "#F5C451",
+  educational: "#8EE3FF",
+  organization: "#C8CFEA",
+  blog: "#F2A3CF",
+  web: "#AEB6D8",
+};
+
+/** Claims are small amber moons: quoted evidence orbiting the concepts it is about. */
+export const CLAIM_RAMP: Ramp = ["#FFF6DD", "#FFE29A", "#F2C46B", "#B8862B", "#5E4313"];
+
 const NAMED_TYPES = new Set(["person", "organization", "place", "event", "date", "entity"]);
 
 export function conceptRampKey(type: string): "idea" | "named" {
@@ -65,7 +84,7 @@ export const CONCEPT_TYPE_LABELS: Record<string, string> = {
 };
 
 /** Legend colours for the three node families. */
-export const ROLE_COLORS = { idea: "#56DB9C", concept: "#3FD3E8", source: "#C8CFEA" } as const;
+export const ROLE_COLORS = { idea: "#56DB9C", concept: "#3FD3E8", source: "#C8CFEA", claim: "#F2C46B" } as const;
 
 export const RELATION_COLORS: Record<Relation, string> = {
   related: "#7C8CFF",
@@ -76,6 +95,7 @@ export const RELATION_COLORS: Record<Relation, string> = {
   contradicts: "#FF8A6B",
   mentions: "#6FA3C7",
   extracted: "#6FA3C7",
+  evidence: "#E8B65A",
   believes: "#56DB9C",
 };
 

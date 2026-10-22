@@ -1,4 +1,4 @@
-import type { DiscoveryConfig, IngestedArticle, IngestErrorCode, IngestStage, SearchResult, SearchScope } from "@/types/research";
+import type { DiscoveryConfig, IngestedArticle, IngestErrorCode, IngestStage, ProviderInfo, ProviderOutcome, SearchResult } from "@/types/research";
 
 /**
  * Browser-side calls to the Discovery API. The browser never talks to search providers
@@ -42,39 +42,12 @@ export async function fetchConfig(signal?: AbortSignal): Promise<DiscoveryConfig
   return body.config;
 }
 
-export interface SearchResponse {
-  provider: { id: string; label: string };
-  scope: SearchScope;
-  query: string;
-  results: SearchResult[];
-  nextOffset: number | null;
-}
-
-export async function searchSources(query: string, scope: SearchScope, offset: number, exclude: string[], signal?: AbortSignal): Promise<SearchResponse> {
-  let response: Response;
-  try {
-    response = await fetch("/api/discovery/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, scope, offset, exclude: exclude.slice(0, 400) }),
-      signal,
-    });
-  } catch (error) {
-    throw offline(error);
-  }
-  if (!response.ok) throw await parseError(response, "Search failed.");
-  return (await response.json()) as SearchResponse;
-}
-
-/** Imports a page through the server, reporting each real stage as it happens. */
-export async function ingestSource(url: string, onStage: (stage: IngestStage) => void, signal?: AbortSignal): Promise<IngestedArticle> {
-  let response: Response;
-  try {
-    response = await fetch("/api/discovery/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }), signal });
-  } catch (error) {
-    throw offline(error);
-  }
-  if (!response.ok || !response.body) throw await parseError(response, "Import failed.");
+/**
+ * Reads a newline-delimited JSON stream, handing each event to `onEvent`. Returns the first
+ * value `onEvent` returns (the final event); errors thrown by `onEvent` propagate.
+ */
+async function readEvents<T>(response: Response, onEvent: (event: Record<string, unknown>) => T | undefined, closedMessage: string): Promise<T> {
+  if (!response.body) throw new ApiError("network", closedMessage);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -88,10 +61,8 @@ export async function ingestSource(url: string, onStage: (stage: IngestStage) =>
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf("\n");
         if (!line) continue;
-        const event = JSON.parse(line) as { stage?: IngestStage; result?: IngestedArticle; error?: { code: ApiError["code"]; message: string } };
-        if (event.stage) onStage(event.stage);
-        if (event.result) return event.result;
-        if (event.error) throw new ApiError(event.error.code, event.error.message);
+        const result = onEvent(JSON.parse(line) as Record<string, unknown>);
+        if (result !== undefined) return result;
       }
       if (done) break;
     }
@@ -99,5 +70,77 @@ export async function ingestSource(url: string, onStage: (stage: IngestStage) =>
     if (error instanceof ApiError) throw error;
     throw offline(error);
   }
-  throw new ApiError("network", "The server closed the connection before the import finished.");
+  throw new ApiError("network", closedMessage);
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  outcomes: ProviderOutcome[];
+  nextOffset: number | null;
+  /** Topic facets the server detected, as labels. */
+  facets: string[];
+  /** Every query the server generated and sent. */
+  queries: string[];
+}
+
+export interface SearchProgress {
+  providers?: ProviderInfo[];
+  outcome?: ProviderOutcome;
+  results?: SearchResult[];
+}
+
+/** Federated search; `onProgress` sees each provider finish, with the ranked results so far. */
+export async function searchSources(query: string, offset: number, exclude: string[], onProgress: (progress: SearchProgress) => void, signal?: AbortSignal): Promise<SearchResponse> {
+  let response: Response;
+  try {
+    response = await fetch("/api/discovery/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, offset, exclude: exclude.slice(0, 800) }),
+      signal,
+    });
+  } catch (error) {
+    throw offline(error);
+  }
+  if (!response.ok) throw await parseError(response, "Search failed.");
+  return readEvents<SearchResponse>(
+    response,
+    (event) => {
+      if (event.type === "plan") onProgress({ providers: event.providers as ProviderInfo[] });
+      else if (event.type === "progress") onProgress({ outcome: event.outcome as ProviderOutcome, results: event.results as SearchResult[] });
+      else if (event.type === "done") return event as unknown as SearchResponse;
+      else if (event.type === "error") {
+        for (const outcome of Array.isArray(event.outcomes) ? (event.outcomes as ProviderOutcome[]) : []) onProgress({ outcome });
+        const failure = event.error as { code: ApiError["code"]; message: string };
+        throw new ApiError(failure.code, failure.message);
+      }
+      return undefined;
+    },
+    "The server closed the connection before the search finished.",
+  );
+}
+
+/** Imports a page through the server, reporting each real stage as it happens. */
+export async function ingestSource(url: string, onStage: (stage: IngestStage) => void, signal?: AbortSignal): Promise<IngestedArticle> {
+  let response: Response;
+  try {
+    response = await fetch("/api/discovery/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }), signal });
+  } catch (error) {
+    throw offline(error);
+  }
+  if (!response.ok || !response.body) throw await parseError(response, "Import failed.");
+  return readEvents<IngestedArticle>(
+    response,
+    (event) => {
+      if (event.stage) onStage(event.stage as IngestStage);
+      if (event.result) return event.result as IngestedArticle;
+      if (event.error) {
+        const failure = event.error as { code: ApiError["code"]; message: string };
+        throw new ApiError(failure.code, failure.message);
+      }
+      return undefined;
+    },
+    "The server closed the connection before the import finished.",
+  );
 }
