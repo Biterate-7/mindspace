@@ -1,57 +1,41 @@
-import type { DiscoveryConfig, SearchProviderId, SearchScope } from "@/types/research";
+import type { DiscoveryConfig, ProviderKind, SearchProviderId } from "@/types/research";
 import type { RawResult } from "@/lib/discovery/rank";
-import { IngestError } from "./errors";
+import { asRecord, type Fetcher, readJson, str, USER_AGENT, type SearchProvider } from "./providers/common";
+import { federalRegisterProvider, worldBankProvider } from "./providers/government";
+import { gdeltProvider } from "./providers/news";
+import { arxivProvider, europePmcProvider, openAlexProvider } from "./providers/scholarly";
+import { gitHubProvider, hackerNewsProvider, stackExchangeProvider } from "./providers/technical";
+
+export type { SearchPage, SearchProvider } from "./providers/common";
 
 /**
- * Search provider abstraction. Providers run only on the server, so API keys never
- * reach the browser. Swap or add providers here without touching the client.
+ * Search provider registry. Providers run only on the server, so API keys never reach the
+ * browser. Discovery asks several independent indexes at once (see federated.ts) instead
+ * of one engine, so no single source — Wikipedia included — can dominate a workspace.
  *
- *   BRAVE_SEARCH_API_KEY  → Brave Search API (web)
- *   TAVILY_API_KEY        → Tavily Search API (web)
+ * Keyless, always available (each can be turned off with DISCOVERY_DISABLE_PROVIDERS):
+ *   openalex, arxiv, europepmc  scholarly literature
+ *   gdelt                       worldwide news
+ *   hackernews, github, stackexchange  technical sources
+ *   federalregister, worldbank  government and intergovernmental documents
+ *   wikipedia                   reference (DISCOVERY_DISABLE_WIKIPEDIA=1 also turns it off)
+ *
+ * Keyed general web search, the broadest coverage:
+ *   BRAVE_SEARCH_API_KEY  → Brave Search API
+ *   TAVILY_API_KEY        → Tavily Search API
  *   DISCOVERY_SEARCH_PROVIDER=brave|tavily picks one when both keys are set.
- *   Wikipedia search needs no key and is labelled as encyclopedia-only.
- *   DISCOVERY_DISABLE_WIKIPEDIA=1 turns it off.
+ *
+ * Optional keys that raise keyless quotas: OPENALEX_API_KEY, GITHUB_TOKEN, STACKEXCHANGE_KEY.
+ * DISCOVERY_CONTACT_EMAIL is sent to OpenAlex as `mailto` (its "polite pool").
  */
-
-export interface SearchPage {
-  results: RawResult[];
-  /** Offset to request for more results, or null when exhausted. */
-  nextOffset: number | null;
-}
-
-export interface SearchProvider {
-  id: SearchProviderId;
-  label: string;
-  scope: SearchScope;
-  search(query: string, options: { offset: number; count: number; signal: AbortSignal }): Promise<SearchPage>;
-}
-
-type Fetcher = typeof fetch;
-
-async function readJson(response: Response, provider: string): Promise<unknown> {
-  if (response.status === 401 || response.status === 403) throw new IngestError("http_error", `${provider} rejected the API key. Check the key in your environment.`, 502);
-  if (response.status === 429) throw new IngestError("rate_limited", `${provider} rate limit reached. Try again in a minute.`, 429);
-  if (!response.ok) throw new IngestError("http_error", `${provider} returned an error (HTTP ${response.status}).`, 502);
-  try {
-    return await response.json();
-  } catch {
-    throw new IngestError("http_error", `${provider} returned an unreadable response.`, 502);
-  }
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
 
 export function braveProvider(apiKey: string, fetcher: Fetcher = fetch): SearchProvider {
   return {
     id: "brave",
     label: "Brave Search",
     scope: "web",
+    kind: "web",
+    keyless: false,
     async search(query, { offset, count, signal }) {
       // Brave paginates by page index (0-9), each page `count` results long.
       const page = Math.floor(offset / count);
@@ -80,6 +64,8 @@ export function tavilyProvider(apiKey: string, fetcher: Fetcher = fetch): Search
     id: "tavily",
     label: "Tavily",
     scope: "web",
+    kind: "web",
+    keyless: false,
     async search(query, { offset, count, signal }) {
       // Tavily has no offset parameter: ask for more results and skip the ones already shown.
       const max = Math.min(20, offset + count);
@@ -107,6 +93,8 @@ export function wikipediaProvider(fetcher: Fetcher = fetch, lang = "en"): Search
     id: "wikipedia",
     label: "Wikipedia",
     scope: "encyclopedia",
+    kind: "encyclopedia",
+    keyless: true,
     async search(query, { offset, count, signal }) {
       const params = new URLSearchParams({
         action: "query",
@@ -120,11 +108,11 @@ export function wikipediaProvider(fetcher: Fetcher = fetch, lang = "en"): Search
         utf8: "1",
       });
       const response = await fetcher(`https://${lang}.wikipedia.org/w/api.php?${params}`, {
-        headers: { Accept: "application/json", "User-Agent": "MindspaceDiscovery/0.1 (local research tool; https://www.mediawiki.org/wiki/API:Etiquette)" },
+        headers: { Accept: "application/json", "User-Agent": USER_AGENT },
         signal,
         cache: "no-store",
       });
-      const body = asRecord(await readJson(response, "Wikipedia"));
+      const body = asRecord(await readJson(response, "Wikipedia", false));
       const items = Array.isArray(asRecord(body.query).search) ? (asRecord(body.query).search as unknown[]) : [];
       // Wikipedia's timestamp is the last edit, not a publication date, so it is deliberately not used.
       const results: RawResult[] = items.map((item) => {
@@ -139,9 +127,14 @@ export function wikipediaProvider(fetcher: Fetcher = fetch, lang = "en"): Search
 }
 
 export interface ProviderSet {
+  /** General web search (keyed), or null. */
   web: SearchProvider | null;
   encyclopedia: SearchProvider | null;
+  /** Every enabled provider, in the order results are attributed: web, scholarly, news, technical, government, reference. */
+  all: SearchProvider[];
 }
+
+const KIND_ORDER: readonly ProviderKind[] = ["web", "scholarly", "news", "technical", "government", "encyclopedia"];
 
 /** Reads provider configuration from the environment on every call (no restart needed in dev). */
 export function providersFromEnv(env: NodeJS.ProcessEnv = process.env, fetcher: Fetcher = fetch): ProviderSet {
@@ -152,14 +145,30 @@ export function providersFromEnv(env: NodeJS.ProcessEnv = process.env, fetcher: 
   if (brave && tavily) web = preferred === "tavily" ? tavilyProvider(tavily, fetcher) : braveProvider(brave, fetcher);
   else if (brave) web = braveProvider(brave, fetcher);
   else if (tavily) web = tavilyProvider(tavily, fetcher);
-  const encyclopedia = env.DISCOVERY_DISABLE_WIKIPEDIA === "1" ? null : wikipediaProvider(fetcher);
-  return { web, encyclopedia };
+
+  const disabled = new Set((env.DISCOVERY_DISABLE_PROVIDERS ?? "").split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean) as SearchProviderId[]);
+  if (env.DISCOVERY_DISABLE_WIKIPEDIA === "1") disabled.add("wikipedia");
+  const encyclopedia = disabled.has("wikipedia") ? null : wikipediaProvider(fetcher);
+  const keyless: SearchProvider[] = [
+    openAlexProvider(fetcher, { apiKey: env.OPENALEX_API_KEY?.trim() || undefined, mailto: env.DISCOVERY_CONTACT_EMAIL?.trim() || undefined }),
+    arxivProvider(fetcher),
+    europePmcProvider(fetcher),
+    gdeltProvider(fetcher),
+    hackerNewsProvider(fetcher),
+    gitHubProvider(fetcher, env.GITHUB_TOKEN?.trim() || undefined),
+    stackExchangeProvider(fetcher, env.STACKEXCHANGE_KEY?.trim() || undefined),
+    federalRegisterProvider(fetcher),
+    worldBankProvider(fetcher),
+  ].filter((p) => !disabled.has(p.id));
+  const all = [...(web ? [web] : []), ...keyless, ...(encyclopedia ? [encyclopedia] : [])].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+  return { web, encyclopedia, all };
 }
 
 export function publicConfig(env: NodeJS.ProcessEnv = process.env): DiscoveryConfig {
-  const { web, encyclopedia } = providersFromEnv(env);
+  const { web, encyclopedia, all } = providersFromEnv(env);
   return {
     web: web ? { id: web.id, label: web.label } : null,
     encyclopedia: encyclopedia ? { id: encyclopedia.id, label: encyclopedia.label } : null,
+    providers: all.map((p) => ({ id: p.id, label: p.label, kind: p.kind, keyless: p.keyless })),
   };
 }

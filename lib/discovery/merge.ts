@@ -1,6 +1,6 @@
 import type { Category, IdeaData, IdeaEdge, IdeaNode, LinkData } from "@/types/graph";
 import { isAttribution } from "@/types/graph";
-import type { ConceptInfo, ConceptRef, ConceptType, SourceInfo } from "@/types/research";
+import type { ClaimInfo, ConceptInfo, ConceptRef, ConceptType, SourceInfo } from "@/types/research";
 import type { GraphState } from "@/lib/graph/ops";
 import { createEdge, hasConnection } from "@/lib/graph/ops";
 import { labelKey, stem, contentWords, truncate } from "@/lib/generation/text";
@@ -17,9 +17,16 @@ import { placeNewNodes } from "./layout";
  * - Attribution (concept → source) is stored as its own edge type, separate from the
  *   semantic links between concepts, and every concept keeps per-source passages.
  * - Every automatic semantic link starts "unreviewed" and carries the sentence that suggested it.
+ * - A source's strongest argument sentences that mention its concepts become claim nodes:
+ *   verbatim quotes linked to the source they come from and to the concepts they are
+ *   evidence about, so every insight on the map can be traced back to a page.
  */
 
 export const MAX_CONCEPT_LABEL = 90;
+export const MAX_CLAIM_LABEL = 120;
+export const MAX_CLAIMS_PER_SOURCE = 2;
+/** Concepts a claim links to as evidence. */
+const MAX_CLAIM_CONCEPTS = 3;
 
 const NAMED: ReadonlySet<ConceptType> = new Set(["person", "organization", "place", "event", "date", "entity"]);
 
@@ -33,6 +40,10 @@ export function isSource(node: { data: IdeaData } | undefined): boolean {
 
 export function isConcept(node: { data: IdeaData } | undefined): boolean {
   return node?.data.role === "concept";
+}
+
+export function isClaim(node: { data: IdeaData } | undefined): boolean {
+  return node?.data.role === "claim";
 }
 
 /** Links the user made or endorsed, which removal must respect. */
@@ -49,16 +60,19 @@ function withKind(concept: ConceptInfo): IdeaData["kind"] {
 export interface ClearResult extends GraphState {
   removedConceptIds: string[];
   keptConceptIds: string[];
+  /** Claims left without a source; removed, or (when re-analysing) kept until the merge decides. */
+  orphanClaimIds: string[];
 }
 
 /**
  * Removes what a source contributed: its attribution links, its passages on concepts,
- * concepts no other source supports, and the automatic links it suggested.
- * Concepts that carry your notes or your own links are kept (without that source).
+ * concepts and claims no other source supports, and the automatic links it suggested.
+ * Concepts and claims that carry your notes, your own links or your review are kept (without that source).
  */
 export function clearSourceContribution(state: GraphState, sourceId: string, options: { removeSource: boolean; keepOrphans?: boolean }): ClearResult {
   const removedConceptIds: string[] = [];
   const keptConceptIds: string[] = [];
+  const orphanClaimIds: string[] = [];
   let edges = state.edges.filter((e) => {
     if (isAttribution(e.data?.relation) && e.target === sourceId) return false;
     if (e.data?.auto && e.data.evidence?.sourceId === sourceId && !isUserLink(e)) return false;
@@ -68,7 +82,22 @@ export function clearSourceContribution(state: GraphState, sourceId: string, opt
   edges = edges.map((e) => (e.data?.evidence?.sourceId === sourceId ? { ...e, data: { ...e.data, evidence: undefined } as LinkData } : e));
   const doomed = new Set<string>(options.removeSource ? [sourceId] : []);
   const nodes: IdeaNode[] = [];
+  const personal = (node: IdeaNode) => node.data.notes.trim().length > 0 || edges.some((e) => (e.source === node.id || e.target === node.id) && isUserLink(e));
   for (const node of state.nodes) {
+    const claim = node.data.claim;
+    if (node.data.role === "claim" && claim?.sourceIds.includes(sourceId)) {
+      const next: ClaimInfo = { ...claim, sourceIds: claim.sourceIds.filter((id) => id !== sourceId) };
+      if (next.sourceIds.length === 0) {
+        const keep = personal(node) || claim.review === "accepted";
+        if (!keep && !options.keepOrphans) {
+          doomed.add(node.id);
+          continue;
+        }
+        if (!keep) orphanClaimIds.push(node.id);
+      }
+      nodes.push({ ...node, data: { ...node.data, claim: next } });
+      continue;
+    }
     const concept = node.data.concept;
     if (node.data.role !== "concept" || !concept || !concept.refs.some((r) => r.sourceId === sourceId)) {
       if (!doomed.has(node.id)) nodes.push(node);
@@ -77,11 +106,11 @@ export function clearSourceContribution(state: GraphState, sourceId: string, opt
     const refs = concept.refs.filter((r) => r.sourceId !== sourceId);
     const next: ConceptInfo = { ...concept, refs };
     if (refs.length === 0) {
-      const personal = node.data.notes.trim().length > 0 || edges.some((e) => (e.source === node.id || e.target === node.id) && isUserLink(e));
+      const mine = personal(node);
       // Re-analysis keeps orphans for now so concepts found again keep their id and position.
-      if (!personal && options.keepOrphans) {
+      if (!mine && options.keepOrphans) {
         removedConceptIds.push(node.id);
-      } else if (!personal) {
+      } else if (!mine) {
         doomed.add(node.id);
         removedConceptIds.push(node.id);
         continue;
@@ -91,7 +120,7 @@ export function clearSourceContribution(state: GraphState, sourceId: string, opt
     nodes.push({ ...node, data: { ...node.data, concept: next, kind: withKind(next) } });
   }
   edges = edges.filter((e) => !doomed.has(e.source) && !doomed.has(e.target));
-  return { nodes, edges, removedConceptIds, keptConceptIds };
+  return { nodes, edges, removedConceptIds, keptConceptIds, orphanClaimIds };
 }
 
 export interface RemovalPreview {
@@ -121,6 +150,7 @@ export interface MergeStats {
   merged: number;
   links: number;
   suggestions: number;
+  claims: number;
 }
 
 export interface MergeResult extends GraphState {
@@ -139,7 +169,7 @@ function addRef(concept: ConceptInfo, ref: ConceptRef, key: string): ConceptInfo
  * what it contributed before, so retries never duplicate concepts or links.
  */
 export function mergeSourceAnalysis(state: GraphState, sourceId: string, analysis: SourceAnalysis, sourcePatch: Partial<SourceInfo>, question: string): MergeResult {
-  const stats: MergeStats = { created: 0, merged: 0, links: 0, suggestions: 0 };
+  const stats: MergeStats = { created: 0, merged: 0, links: 0, suggestions: 0, claims: 0 };
   const cleared = clearSourceContribution(state, sourceId, { removeSource: false, keepOrphans: true });
   let nodes = cleared.nodes;
   let edges = cleared.edges;
@@ -240,8 +270,46 @@ export function mergeSourceAnalysis(state: GraphState, sourceId: string, analysi
     for (const t of related) if (suggest(core.id, t.id, { evidence: { sourceId, text: t.passage as string } })) stats.suggestions++;
   }
 
-  // Concepts this source used to support but no longer mentions go now (unless they hold your notes or links).
-  const stale = new Set(cleared.removedConceptIds.filter((id) => nodes.find((n) => n.id === id)?.data.concept?.refs.length === 0));
+  // Claims: the source's argument sentences that name its concepts, most concepts first.
+  const named = [...new Map(touched.filter((t) => t.label.length >= 3).map((t) => [t.id, t.label.toLowerCase()])).entries()];
+  const claimByKey = new Map<string, string>();
+  for (const n of nodes) if (n.data.role === "claim") claimByKey.set(labelKey(n.data.label), n.id);
+  const claims = analysis.keyPassages
+    .map((text) => {
+      const lower = text.toLowerCase();
+      return { text, about: named.filter(([, label]) => lower.includes(label)).map(([id]) => id) };
+    })
+    .filter((c) => c.about.length > 0)
+    .sort((a, b) => b.about.length - a.about.length)
+    .slice(0, MAX_CLAIMS_PER_SOURCE);
+  for (const { text, about } of claims) {
+    const label = truncate(text, MAX_CLAIM_LABEL);
+    const key = labelKey(label);
+    let id = claimByKey.get(key);
+    if (id && byId.has(id)) {
+      // The same sentence in another source supports the existing claim instead of duplicating it.
+      const index = nodes.findIndex((n) => n.id === id);
+      const claim = nodes[index].data.claim as ClaimInfo;
+      if (!claim.sourceIds.includes(sourceId)) nodes = nodes.map((n, i) => (i === index ? { ...n, data: { ...n.data, claim: { ...claim, sourceIds: [...claim.sourceIds, sourceId] } } } : n));
+    } else {
+      id = createId("k", taken);
+      taken.add(id);
+      const claim: ClaimInfo = { text: truncate(text, 600), sourceIds: [sourceId], review: "unreviewed" };
+      nodes = [...nodes, { id, type: "idea", position: { ...sourceNode.position }, data: { label, notes: "", category: "note", kind: "moon", seed: hashString(`${id}:${key}`), role: "claim", claim } }];
+      byId.set(id, nodes.length - 1);
+      claimByKey.set(key, id);
+      newIds.push(id);
+      stats.claims++;
+    }
+    if (!hasConnection(edges, id, sourceId)) edges = [...edges, createEdge(edges, id, sourceId, "extracted")];
+    for (const conceptId of about.slice(0, MAX_CLAIM_CONCEPTS)) if (!hasConnection(edges, id, conceptId)) edges = [...edges, createEdge(edges, id, conceptId, "evidence")];
+  }
+
+  // Concepts and claims this source used to support but no longer contains go now (unless they hold your notes, links or review).
+  const stale = new Set([
+    ...cleared.removedConceptIds.filter((id) => nodes.find((n) => n.id === id)?.data.concept?.refs.length === 0),
+    ...cleared.orphanClaimIds.filter((id) => nodes.find((n) => n.id === id)?.data.claim?.sourceIds.length === 0),
+  ]);
   if (stale.size) {
     nodes = nodes.filter((n) => !stale.has(n.id));
     edges = edges.filter((e) => !stale.has(e.source) && !stale.has(e.target));

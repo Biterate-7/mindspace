@@ -1,5 +1,5 @@
 import type { Edge, Node, Viewport } from "@xyflow/react";
-import type { ConceptInfo, EdgeReview, Evidence, ResearchMeta, SourceInfo } from "./research";
+import type { ClaimInfo, ConceptInfo, EdgeReview, Evidence, ResearchMeta, SourceInfo } from "./research";
 
 /** The celestial body used to draw a node. Roughly maps to its depth in the map. */
 export type NodeKind = "core" | "planet" | "star" | "moon";
@@ -29,9 +29,9 @@ export const CATEGORIES: readonly Category[] = [
 
 /**
  * Relationship types. The first five are the Create-mode vocabulary; Discovery adds
- * contradiction, attribution (source links) and the user's own asserted links.
+ * contradiction, attribution (source links), claim evidence and the user's own asserted links.
  */
-export type Relation = "related" | "causes" | "supports" | "example" | "contrasts" | "contradicts" | "mentions" | "extracted" | "believes";
+export type Relation = "related" | "causes" | "supports" | "example" | "contrasts" | "contradicts" | "mentions" | "extracted" | "evidence" | "believes";
 
 /** Relationship choices offered in Create mode. */
 export const RELATIONS: readonly Relation[] = ["related", "causes", "supports", "example", "contrasts"];
@@ -39,19 +39,22 @@ export const RELATIONS: readonly Relation[] = ["related", "causes", "supports", 
 /** Semantic relationship choices offered in Discovery. */
 export const RESEARCH_RELATIONS: readonly Relation[] = ["related", "supports", "contradicts", "causes", "example", "contrasts", "believes"];
 
-/** Source attribution: concept → source. Kept apart from semantic relationships. */
-export const ATTRIBUTION_RELATIONS: readonly Relation[] = ["extracted", "mentions"];
+/**
+ * Provenance links, kept apart from semantic relationships: concept/claim → source
+ * ("extracted", "mentions") and claim → the concepts it is evidence about ("evidence").
+ */
+export const ATTRIBUTION_RELATIONS: readonly Relation[] = ["extracted", "mentions", "evidence"];
 
 export const ALL_RELATIONS: readonly Relation[] = [...RELATIONS, "contradicts", "believes", ...ATTRIBUTION_RELATIONS];
 
 export function isAttribution(relation: Relation | undefined): boolean {
-  return relation === "extracted" || relation === "mentions";
+  return relation === "extracted" || relation === "mentions" || relation === "evidence";
 }
 
 export type InputMode = "topic" | "text" | "dump";
 
 /** Discovery node roles. Nodes without a role are the user's own ideas. */
-export type NodeRole = "source" | "concept";
+export type NodeRole = "source" | "concept" | "claim";
 
 export interface IdeaData extends Record<string, unknown> {
   label: string;
@@ -63,6 +66,7 @@ export interface IdeaData extends Record<string, unknown> {
   role?: NodeRole;
   source?: SourceInfo;
   concept?: ConceptInfo;
+  claim?: ClaimInfo;
 }
 
 export interface LinkData extends Record<string, unknown> {

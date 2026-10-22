@@ -31,7 +31,8 @@ export function filterSets(nodes: readonly IdeaNode[], edges: readonly IdeaEdge[
     const kept = edges.filter(isUnreviewed);
     return { nodes: new Set(kept.flatMap((e) => [e.source, e.target])), edges: new Set(kept.map((e) => e.id)) };
   }
-  const match = (n: IdeaNode) => (filter === "ideas" ? !n.data.role : filter === "sources" ? n.data.role === "source" : n.data.role === "concept");
+  // Claims are findings, so they light up with concepts.
+  const match = (n: IdeaNode) => (filter === "ideas" ? !n.data.role : filter === "sources" ? n.data.role === "source" : n.data.role === "concept" || n.data.role === "claim");
   const ids = new Set(nodes.filter(match).map((n) => n.id));
   return { nodes: ids, edges: new Set(edges.filter((e) => ids.has(e.source) && ids.has(e.target)).map((e) => e.id)) };
 }

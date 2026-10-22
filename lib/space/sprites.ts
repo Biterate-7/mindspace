@@ -1,7 +1,7 @@
-import type { Category, NodeKind } from "@/types/graph";
+import type { Category, NodeKind, NodeRole } from "@/types/graph";
 import { SPRITE_CELLS } from "@/lib/graph/geometry";
 import { createRng } from "@/lib/utils/random";
-import { CATEGORY_RAMPS, CONCEPT_RAMPS, conceptRampKey, CORE_RAMP, SOURCE_RAMP, type Ramp } from "./palette";
+import { CATEGORY_RAMPS, CLAIM_RAMP, CONCEPT_RAMPS, conceptRampKey, CORE_RAMP, SOURCE_RAMP, type Ramp } from "./palette";
 
 /**
  * Procedural pixel-art sprites for celestial bodies. Sprites are built on a small
@@ -406,8 +406,9 @@ export function getSprite(kind: NodeKind, category: Category, seed: number): Spr
   return spriteFor(kind, CATEGORY_RAMPS[category], category, seed);
 }
 
-/** Sprite for a Discovery node: satellites for sources, cool-toned bodies for concepts. */
-export function getRoleSprite(data: { kind: NodeKind; category: Category; seed: number; role?: "source" | "concept"; concept?: { type: string } }): Sprite {
+/** Sprite for a Discovery node: satellites for sources, cool-toned bodies for concepts, amber moons for claims. */
+export function getRoleSprite(data: { kind: NodeKind; category: Category; seed: number; role?: NodeRole; concept?: { type: string } }): Sprite {
+  if (data.role === "claim") return spriteFor("moon", CLAIM_RAMP, "claim", data.seed);
   if (data.role === "source") {
     const key = `station:${data.seed % 2}`;
     const cached = cache.get(key);

@@ -1,6 +1,6 @@
 import type { Category, Graph, IdeaData, IdeaEdge, IdeaNode, LinkData, NodeKind, Relation } from "@/types/graph";
 import { CATEGORIES, NODE_KINDS } from "@/types/graph";
-import { sanitizeConceptInfo, sanitizeLinkData, sanitizeSourceInfo } from "@/lib/discovery/sanitize";
+import { sanitizeClaimInfo, sanitizeConceptInfo, sanitizeLinkData, sanitizeSourceInfo } from "@/lib/discovery/sanitize";
 import { findOpenPosition } from "@/lib/generation/layout";
 import { createId, hashString } from "@/lib/utils/random";
 
@@ -216,6 +216,9 @@ export function sanitizeGraph(graph: Graph): Graph {
     } else if (n.data.role === "concept") {
       const concept = sanitizeConceptInfo(n.data.concept);
       if (concept) Object.assign(data, { role: "concept", concept });
+    } else if (n.data.role === "claim") {
+      const claim = sanitizeClaimInfo(n.data.claim);
+      if (claim) Object.assign(data, { role: "claim", claim });
     }
     nodes.push({ id: n.id, position, data });
   }

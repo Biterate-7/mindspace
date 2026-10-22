@@ -71,6 +71,7 @@ export const RELATION_LABELS: Record<Relation, string> = {
   contradicts: "contradicts",
   mentions: "mentioned in",
   extracted: "extracted from",
+  evidence: "evidence about",
   believes: "user believes",
 };
 

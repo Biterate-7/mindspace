@@ -1,11 +1,12 @@
 import type { StateCreator } from "zustand";
 import type { IdeaNode, MindMap } from "@/types/graph";
-import type { IngestErrorCode, SearchResult, SearchRun, SourceError, SourceInfo } from "@/types/research";
+import type { IngestErrorCode, ProviderOutcome, SearchResult, SearchRun, SourceError, SourceInfo } from "@/types/research";
 import { analyzeLocally } from "@/lib/discovery/analyze/local";
 import { ApiError, fetchConfig, ingestSource, searchSources } from "@/lib/discovery/client";
 import { contentHash, contentStore } from "@/lib/discovery/contentStore";
 import { placeNewNodes } from "@/lib/discovery/layout";
 import { mergeSourceAnalysis, removeSource } from "@/lib/discovery/merge";
+import { abstractOnly, canUseAbstract, isImportable, pickTopResults, sourceFromResult, sourceKeys } from "@/lib/discovery/sources";
 import { domainOf, parseHttpUrl, splitUrlInput, urlKey } from "@/lib/discovery/url";
 import * as ops from "@/lib/graph/ops";
 import { truncate } from "@/lib/generation/text";
@@ -22,6 +23,8 @@ import type { Job, JobStage, ResearchSlice, Store } from "./types";
  */
 
 export const MAX_SOURCES = 40;
+/** Sources a new research run imports automatically once search finishes. */
+export const AUTO_IMPORT = 8;
 const MAX_CONCURRENT = 3;
 const MAX_MANUAL_CHARS = 100_000;
 
@@ -61,6 +64,10 @@ function placeholderTitle(url: URL): string {
   const path = decodeURIComponent(url.pathname).replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? "";
   const words = path.replace(/\.[a-z0-9]{2,5}$/i, "").replace(/[-_]+/g, " ").trim();
   return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : domainOf(url);
+}
+
+function abstractPatch(source: SourceInfo, accessError: SourceError): Partial<SourceInfo> {
+  return { textOrigin: "abstract", accessError, retrievedAt: Date.now(), wordCount: (source.abstract ?? "").split(/\s+/).length, truncated: undefined, paywallHint: undefined };
 }
 
 function errorFrom(error: unknown): SourceError {
@@ -157,36 +164,49 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
         text = stored.text;
       } else if (source.origin === "manual") {
         throw new ApiError("no_content", "The pasted text for this source is no longer stored. Paste it again.");
+      } else if (abstractOnly(source)) {
+        // A PDF or similar file: analyse the abstract the index supplied, and say so.
+        text = source.abstract as string;
+        patch = abstractPatch(source, { code: "unsupported_type", message: "This file type can't be read by Discovery, so only the abstract was analysed." });
       } else {
         setJob(sourceId, "checking");
-        const article = await ingestSource(source.url, (stage) => setJob(sourceId, stage), controller.signal);
-        text = article.text;
-        const canonical = article.canonicalUrl ?? article.finalUrl;
-        patch = {
-          title: article.title || source.title,
-          canonicalUrl: article.canonicalUrl,
-          domain: article.domain || source.domain,
-          siteName: article.siteName,
-          byline: article.byline,
-          description: article.description,
-          // A page's own publication date wins over one reported by search; never invent one.
-          publishedAt: article.publishedAt ?? (source.publishedFrom === "search" ? source.publishedAt : undefined),
-          publishedFrom: article.publishedAt ? "page" : source.publishedFrom === "search" && source.publishedAt ? "search" : undefined,
-          retrievedAt: article.retrievedAt,
-          wordCount: article.wordCount,
-          truncated: article.truncated || undefined,
-          paywallHint: article.paywallHint || undefined,
-          textOrigin: "fetched",
-          key: source.key || urlKey(canonical),
-        };
-        // Duplicate check by canonical address before storing anything.
-        const canonicalKey = urlKey(canonical);
-        const twin = sourceNodes(get().nodes).find((n) => n.id !== sourceId && (n.data.source?.key === canonicalKey || (n.data.source?.canonicalUrl && urlKey(n.data.source.canonicalUrl) === canonicalKey)));
-        if (twin) throw new ApiError("duplicate", `This is the same page as “${twin.data.label}”, which is already imported.`);
         try {
-          await store.put({ mapId, sourceId, url: article.finalUrl, text });
-        } catch {
-          // Storage can fail (quota, private mode). Analysis still works; re-analysis will refetch.
+          const article = await ingestSource(source.url, (stage) => setJob(sourceId, stage), controller.signal);
+          text = article.text;
+          const canonical = article.canonicalUrl ?? article.finalUrl;
+          patch = {
+            title: article.title || source.title,
+            canonicalUrl: article.canonicalUrl,
+            domain: article.domain || source.domain,
+            siteName: article.siteName ?? source.siteName,
+            byline: article.byline || source.byline,
+            description: article.description,
+            // A page's own publication date wins over one reported by search; never invent one.
+            publishedAt: article.publishedAt ?? (source.publishedFrom === "search" ? source.publishedAt : undefined),
+            publishedFrom: article.publishedAt ? "page" : source.publishedFrom === "search" && source.publishedAt ? "search" : undefined,
+            retrievedAt: article.retrievedAt,
+            wordCount: article.wordCount,
+            truncated: article.truncated || undefined,
+            paywallHint: article.paywallHint || undefined,
+            textOrigin: "fetched",
+            accessError: undefined,
+            key: source.key || urlKey(canonical),
+          };
+          // Duplicate check by canonical address before storing anything.
+          const canonicalKey = urlKey(canonical);
+          const twin = sourceNodes(get().nodes).find((n) => n.id !== sourceId && n.data.source && sourceKeys(n.data.source).includes(canonicalKey));
+          if (twin) throw new ApiError("duplicate", `This is the same page as “${twin.data.label}”, which is already imported.`);
+          try {
+            await store.put({ mapId, sourceId, url: article.finalUrl, text });
+          } catch {
+            // Storage can fail (quota, private mode). Analysis still works; re-analysis will refetch.
+          }
+        } catch (error) {
+          const failure = errorFrom(error);
+          // The page can't be read here, but a scholarly index supplied its abstract: analyse that, labelled as such.
+          if (controller.signal.aborted || !canUseAbstract(source, failure)) throw error;
+          text = source.abstract as string;
+          patch = abstractPatch(source, failure);
         }
       }
       if (controller.signal.aborted || !isCurrent(mapId)) return;
@@ -246,7 +266,7 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
     return ids;
   };
 
-  const existingKeys = () => new Set(sourceNodes(get().nodes).flatMap((n) => [n.data.source?.key, n.data.source?.canonicalUrl ? urlKey(n.data.source.canonicalUrl) : undefined]).filter((k): k is string => Boolean(k)));
+  const existingKeys = () => new Set(sourceNodes(get().nodes).flatMap((n) => (n.data.source ? sourceKeys(n.data.source) : [])));
 
   return {
     mode: "create",
@@ -304,18 +324,31 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
         });
     },
 
-    startResearch: (question, urlText = "") => {
+    startResearch: (question, urlText = "", options = {}) => {
       const state = get();
       const clean = question.replace(/\s+/g, " ").trim().slice(0, 500);
       if (!clean) {
         state.toast("Write the question you want to understand first.", { tone: "error" });
         return false;
       }
+      const title = truncate(clean.replace(/[?!.]+$/, ""), 100);
+      // Asking the same question again enriches the galaxy you already have instead of starting a duplicate.
+      const sameQuestion = state.maps.find((m) => m.workspace === "discovery" && m.title.trim().toLowerCase() === title.toLowerCase());
+      if (sameQuestion) {
+        state.openMap(sameQuestion.id);
+        if (get().current?.id === sameQuestion.id) {
+          set({ discoverOpen: false, createOpen: false, researchPanelOpen: true, researchTab: "search" });
+          if (urlText.trim()) get().addSourceUrls(urlText);
+          get().toast("Reopened your research on this question — new sources are added to the same galaxy.", { duration: 5200 });
+          void get().runSearch(get().current?.research?.question ?? clean, { autoImport: options.autoImport });
+          return true;
+        }
+      }
       const now = Date.now();
       const coreId = "q_root";
       const map: MindMap = {
         id: createId("m"),
-        title: truncate(clean.replace(/[?!.]+$/, ""), 100),
+        title,
         createdAt: now,
         updatedAt: now,
         starred: false,
@@ -333,7 +366,7 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
         if (result.added > 0) set({ researchTab: "sources" });
       }
       const config = get().discoveryConfig.value;
-      if (config?.web || config?.encyclopedia || get().discoveryConfig.status !== "ready") void get().runSearch(clean);
+      if (!config || config.providers.length > 0) void get().runSearch(clean, { autoImport: options.autoImport });
       return true;
     },
 
@@ -343,8 +376,6 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
       if (!state.current || !research) return;
       const previous = research.search;
       const more = Boolean(options.more && previous);
-      const config = state.discoveryConfig.value;
-      const scope = options.scope ?? previous?.scope ?? (config && !config.web && config.encyclopedia ? "encyclopedia" : "web");
       const text = (query ?? (more ? previous?.query : research.question) ?? "").replace(/\s+/g, " ").trim();
       if (!text) return;
       if (more && previous?.nextOffset == null) return;
@@ -352,21 +383,39 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
       const controller = new AbortController();
       searchController = controller;
       const mapId = state.current.id;
-      set({ searchState: { status: "searching", more } });
+      let outcomes: ProviderOutcome[] = [];
+      set({ searchState: { status: "searching", more, outcomes: [], live: more ? undefined : [] } });
       try {
         const offset = more ? (previous?.nextOffset ?? 0) : 0;
-        const exclude = more ? (previous?.results.map((r) => r.key) ?? []) : [];
-        const response = await searchSources(text, scope, offset, exclude, controller.signal);
+        // Results already shown, and sources already in the workspace, are not returned again.
+        const exclude = [...new Set([...(more ? (previous?.results.flatMap((r) => [r.key, ...(r.altKeys ?? [])]) ?? []) : []), ...existingKeys()])];
+        const response = await searchSources(
+          text,
+          offset,
+          exclude,
+          (progress) => {
+            if (controller.signal.aborted || !isCurrent(mapId)) return;
+            if (progress.outcome) outcomes = [...outcomes.filter((o) => o.id !== progress.outcome?.id), progress.outcome];
+            const current = get().searchState;
+            set({ searchState: { ...current, providers: progress.providers ?? current.providers, outcomes, live: more ? undefined : (progress.results ?? current.live) } });
+          },
+          controller.signal,
+        );
         if (controller.signal.aborted || !isCurrent(mapId)) return;
+        const run = { outcomes: response.outcomes, queries: response.queries, facets: response.facets };
         const search: SearchRun = more && previous
-          ? { ...previous, results: [...previous.results, ...response.results].slice(0, 120), nextOffset: response.nextOffset, fetchedAt: Date.now() }
-          : { query: text, scope: response.scope, provider: response.provider.id as SearchRun["provider"], results: response.results, fetchedAt: Date.now(), nextOffset: response.nextOffset };
+          ? { ...previous, ...run, results: [...previous.results, ...response.results].slice(0, 120), nextOffset: response.nextOffset, fetchedAt: Date.now() }
+          : { query: text, scope: "web", provider: "multi", ...run, results: response.results, fetchedAt: Date.now(), nextOffset: response.nextOffset };
         get().setResearch({ search });
         set({ searchState: { status: "idle", more: false }, selectedResults: more ? get().selectedResults : [] });
+        if (options.autoImport && options.autoImport > 0) {
+          const imported = get().importTopResults(options.autoImport);
+          if (imported > 0) set({ researchTab: "sources" });
+        }
       } catch (error) {
         if (controller.signal.aborted) return;
         const apiError = error instanceof ApiError ? error : null;
-        set({ searchState: { status: "error", more, error: apiError?.message ?? "Search failed.", code: apiError?.code } });
+        set({ searchState: { status: "error", more, error: apiError?.message ?? "Search failed.", code: apiError?.code, outcomes } });
       }
     },
 
@@ -382,28 +431,24 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
       const search = state.current?.research?.search;
       if (!search) return;
       const keys = existingKeys();
-      const chosen = ids
-        .map((id) => search.results.find((r) => r.id === id))
-        .filter((r): r is SearchResult => r !== undefined && !keys.has(r.key) && !r.unsupported);
+      const chosen = ids.map((id) => search.results.find((r) => r.id === id)).filter((r): r is SearchResult => r !== undefined && isImportable(r, keys));
       if (chosen.length === 0) {
         state.toast("Those results are already imported.");
         return;
       }
-      const infos: SourceInfo[] = chosen.map((r) => ({
-        url: r.url,
-        key: r.key,
-        domain: r.domain,
-        title: r.title,
-        snippet: r.snippet || undefined,
-        publishedAt: r.publishedAt,
-        publishedFrom: r.publishedAt ? "search" : undefined,
-        status: "pending",
-        origin: "search",
-        query: search.query,
-      }));
-      const added = addSourceNodes(infos);
+      const added = addSourceNodes(chosen.map((r) => sourceFromResult(r, r.query ?? search.query)));
       set({ selectedResults: [] });
       enqueue(added);
+    },
+
+    importTopResults: (count) => {
+      const search = get().current?.research?.search;
+      if (!search) return 0;
+      const room = MAX_SOURCES - sourceNodes(get().nodes).length;
+      const picked = pickTopResults(search.results, existingKeys(), Math.min(count, room));
+      if (picked.length === 0) return 0;
+      get().importResults(picked.map((r) => r.id));
+      return picked.length;
     },
 
     addSourceUrls: (text) => {
@@ -553,6 +598,14 @@ export const createResearchSlice: StateCreator<Store, [], [], ResearchSlice> = (
       if (!node?.data.concept) return;
       const concept = { ...node.data.concept, ...patch };
       state.commitGraph({ nodes: ops.updateNodeData(state.nodes, nodeId, { concept }) }, `concept:${nodeId}:${Object.keys(patch).sort().join(",")}`);
+    },
+
+    updateClaim: (nodeId, patch) => {
+      const state = get();
+      const node = state.nodes.find((n) => n.id === nodeId);
+      if (!node?.data.claim) return;
+      const claim = { ...node.data.claim, ...patch };
+      state.commitGraph({ nodes: ops.updateNodeData(state.nodes, nodeId, { claim }) }, `claim:${nodeId}:${Object.keys(patch).sort().join(",")}`);
     },
 
     connectResearch: (source, target, relation, extra = {}) => {

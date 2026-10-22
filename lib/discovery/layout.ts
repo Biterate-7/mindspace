@@ -21,7 +21,12 @@ function centreOf(nodes: readonly NodeLike[]): { x: number; y: number } {
   return core ? { ...core.position } : { x: 0, y: 0 };
 }
 
-/** concept id -> source ids, from attribution edges (falls back to concept refs). */
+/** Concepts and claims: nodes that orbit the sources they came from. */
+function sourced(n: NodeLike): boolean {
+  return n.data.role === "concept" || n.data.role === "claim";
+}
+
+/** concept/claim id -> source ids, from attribution edges (falls back to concept refs or claim sources). */
 export function conceptSources(nodes: readonly NodeLike[], edges: readonly EdgeLike[]): Map<string, string[]> {
   const sources = new Set(nodes.filter((n) => n.data.role === "source").map((n) => n.id));
   const map = new Map<string, string[]>();
@@ -30,8 +35,8 @@ export function conceptSources(nodes: readonly NodeLike[], edges: readonly EdgeL
     map.set(e.source, [...(map.get(e.source) ?? []), e.target]);
   }
   for (const n of nodes) {
-    if (n.data.role !== "concept" || map.has(n.id)) continue;
-    const refs = (n.data.concept?.refs ?? []).map((r) => r.sourceId).filter((id) => sources.has(id));
+    if (!sourced(n) || map.has(n.id)) continue;
+    const refs = (n.data.concept?.refs.map((r) => r.sourceId) ?? n.data.claim?.sourceIds ?? []).filter((id) => sources.has(id));
     if (refs.length) map.set(n.id, refs);
   }
   return map;
@@ -90,7 +95,7 @@ export function computeResearchLayout(nodes: readonly NodeLike[], edges: readonl
   const exclusive = new Map<string, string[]>();
   const orphans: string[] = [];
   for (const n of nodes) {
-    if (n.data.role !== "concept") continue;
+    if (!sourced(n)) continue;
     const owners = (bySource.get(n.id) ?? []).filter((id) => positions[id]);
     if (owners.length === 0) orphans.push(n.id);
     else if (owners.length === 1) exclusive.set(owners[0], [...(exclusive.get(owners[0]) ?? []), n.id]);
@@ -148,7 +153,7 @@ export function placeNewNodes(nodes: readonly NodeLike[], edges: readonly EdgeLi
   for (const n of nodes) {
     if (!newIds.has(n.id) || n.data.role === "source") continue;
     const owners = (bySource.get(n.id) ?? []).filter((id) => positions[id]);
-    if (n.data.role === "concept" && owners.length === 1) {
+    if (sourced(n) && owners.length === 1) {
       fans.set(owners[0], [...(fans.get(owners[0]) ?? []), n.id]);
     } else if (owners.length > 1) {
       const x = owners.reduce((sum, id) => sum + positions[id].x, 0) / owners.length;

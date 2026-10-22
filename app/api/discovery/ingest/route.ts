@@ -1,12 +1,16 @@
+import type { IngestedArticle } from "@/types/research";
+import { TtlCache } from "@/lib/discovery/server/cache";
 import { IngestError } from "@/lib/discovery/server/errors";
 import { jsonError, rateLimited, readJsonBody } from "@/lib/discovery/server/http";
 import { ingestUrl } from "@/lib/discovery/server/ingest";
 import { clientKey, RateLimiter } from "@/lib/discovery/server/rateLimit";
-import { MAX_URL_LENGTH } from "@/lib/discovery/url";
+import { MAX_URL_LENGTH, urlKey } from "@/lib/discovery/url";
 
 // Runs on the Node.js runtime (the default): it needs node:dns, node:http and zlib.
 
 const limiter = new RateLimiter(40, 60_000);
+/** Pages read in the last half hour, so re-running research does not fetch them again. */
+const recent = new TtlCache<IngestedArticle>(200, 30 * 60_000);
 
 /**
  * Imports one public page. POST { url }.
@@ -32,7 +36,10 @@ export async function POST(request: Request) {
         }
       };
       try {
-        const article = await ingestUrl(url, { signal: request.signal, onStage: (stage) => send({ stage }) });
+        const key = urlKey(url);
+        const cached = recent.get(key);
+        const article = cached ?? (await ingestUrl(url, { signal: request.signal, onStage: (stage) => send({ stage }) }));
+        if (!cached) recent.set(key, article);
         send({ result: article });
       } catch (error) {
         const failure = error instanceof IngestError ? { code: error.code, message: error.message } : { code: "network", message: "The page could not be imported." };
